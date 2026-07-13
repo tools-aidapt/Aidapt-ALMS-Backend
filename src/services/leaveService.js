@@ -1,0 +1,268 @@
+'use strict';
+
+const LeaveRequest = require('../models/LeaveRequest');
+const LeaveBalance = require('../models/LeaveBalance');
+const Employee = require('../models/Employee');
+const Shift = require('../models/Shift');
+const { withTransaction } = require('../config/db');
+const holidayService = require('./holidayService');
+const emailService = require('./emailService');
+const { generateDecisionToken, safeEquals } = require('../utils/tokenGenerator');
+const { nowUtcIso, dateRangeInclusive, dowForDateStr } = require('../utils/dateUtils');
+const {
+  badRequest,
+  conflict,
+  notFound,
+  forbidden,
+} = require('../middleware/errorHandler');
+
+const LEAVE_TYPES = ['Annual', 'Sick', 'Casual'];
+const DEFAULT_WORKING_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+
+function serialize(rec) {
+  const f = rec.fields;
+  return {
+    id: rec.id,
+    employee: f.Employee || [],
+    leaveType: f.LeaveType || null,
+    fromDate: f.FromDate || null,
+    toDate: f.ToDate || null,
+    days: f.Days ?? null,
+    reason: f.Reason || null,
+    status: f.Status || null,
+    manager: f.Manager || [],
+    appliedAt: f.AppliedAt || null,
+    decidedAt: f.DecidedAt || null,
+    // DecisionToken deliberately omitted from API output.
+  };
+}
+
+/** Working-day set for an employee, from their assigned shift (fallback Mon–Fri). */
+async function workingDaysFor(employee) {
+  const shiftId = (employee.fields.AssignedShift || [])[0];
+  if (!shiftId) return new Set(DEFAULT_WORKING_DAYS);
+  const shift = await Shift.get(shiftId);
+  const days = shift && shift.fields.WorkingDays;
+  return new Set(days && days.length ? days : DEFAULT_WORKING_DAYS);
+}
+
+/**
+ * Count leave days between fromDate and toDate inclusive, excluding non-working
+ * weekdays (per shift) and holidays. Pure once the inputs are gathered.
+ */
+async function computeLeaveDays(employee, fromDate, toDate) {
+  const dates = dateRangeInclusive(fromDate, toDate);
+  if (!dates.length) throw badRequest('toDate must be on or after fromDate');
+  const working = await workingDaysFor(employee);
+  const holidays = await holidayService.holidayDateSet(fromDate, toDate);
+  let count = 0;
+  for (const d of dates) {
+    if (!working.has(dowForDateStr(d))) continue; // weekend / non-working day
+    if (holidays.has(d)) continue; // public holiday
+    count += 1;
+  }
+  return count;
+}
+
+/**
+ * Submit a leave request. Computes Days, copies the approver, stores a
+ * single-use decision token, and emails the manager.
+ */
+async function submit(employeeId, { leaveType, fromDate, toDate, reason }) {
+  if (!LEAVE_TYPES.includes(leaveType)) {
+    throw badRequest(`leaveType must be one of ${LEAVE_TYPES.join(', ')}`);
+  }
+  const employee = await Employee.get(employeeId);
+  if (!employee) throw notFound('Employee not found');
+
+  const days = await computeLeaveDays(employee, fromDate, toDate);
+  if (days <= 0) {
+    throw badRequest('Requested range contains no working days', 'NO_WORKING_DAYS');
+  }
+
+  const managerId = (employee.fields.Manager || [])[0] || null;
+  const token = generateDecisionToken();
+
+  const fields = {
+    Employee: [employeeId],
+    LeaveType: leaveType,
+    FromDate: fromDate,
+    ToDate: toDate,
+    Days: days,
+    Reason: reason || '',
+    Status: 'Pending',
+    AppliedAt: nowUtcIso(),
+    DecisionToken: token,
+  };
+  if (managerId) fields.Manager = [managerId];
+
+  const rec = await LeaveRequest.create(fields);
+
+  // Fire off the approval email (non-fatal if it fails).
+  if (managerId) {
+    try {
+      const manager = await Employee.get(managerId);
+      if (manager && manager.fields.Email) {
+        await emailService.sendLeaveApprovalRequest({
+          managerEmail: manager.fields.Email,
+          employeeName: employee.fields.Name,
+          request: rec,
+          token,
+        });
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[leave] approval email failed:', err.message);
+    }
+  }
+
+  return serialize(rec);
+}
+
+// Whitelist of leave-type -> balance column, so it can be interpolated safely.
+const BALANCE_COLUMN = { Annual: 'annual', Sick: 'sick', Casual: 'casual' };
+
+/**
+ * Core decision transition, shared by in-app and email paths.
+ *
+ * Approval is atomic: balance check + deduction + status flip run in one
+ * transaction with a row lock (SELECT ... FOR UPDATE), so a crash or a
+ * concurrent approval can't double-deduct or half-apply.
+ * @param {'Approved'|'Rejected'} decision
+ */
+async function applyDecision(request, decision) {
+  if (request.fields.Status !== 'Pending') {
+    throw conflict(`Request already ${request.fields.Status}`, 'ALREADY_DECIDED');
+  }
+  const employeeId = (request.fields.Employee || [])[0];
+
+  if (decision === 'Approved') {
+    const col = BALANCE_COLUMN[request.fields.LeaveType];
+    if (!col) throw conflict('Unknown leave type', 'BAD_LEAVE_TYPE');
+    const days = request.fields.Days;
+
+    await withTransaction(async (client) => {
+      const { rows } = await client.query(
+        `SELECT ${col} AS bal FROM leave_balances WHERE employee_id = $1 FOR UPDATE`,
+        [employeeId]
+      );
+      if (!rows[0]) throw conflict('No leave balance record for employee', 'NO_BALANCE');
+      const current = Number(rows[0].bal);
+      if (current < days) {
+        throw conflict(
+          `Insufficient ${request.fields.LeaveType} balance: have ${current}, need ${days}`,
+          'INSUFFICIENT_BALANCE'
+        );
+      }
+      await client.query(
+        `UPDATE leave_balances SET ${col} = ${col} - $1 WHERE employee_id = $2`,
+        [days, employeeId]
+      );
+      await client.query(
+        `UPDATE leave_requests SET status = $1, decided_at = now(), decision_token = NULL WHERE id = $2`,
+        ['Approved', request.id]
+      );
+    });
+  } else {
+    await LeaveRequest.update(request.id, {
+      Status: decision,
+      DecidedAt: nowUtcIso(),
+      DecisionToken: '', // invalidate single-use token on rejection
+    });
+  }
+
+  const updated = await LeaveRequest.get(request.id);
+
+  // Notify the employee (non-fatal).
+  try {
+    const employee = employeeId ? await Employee.get(employeeId) : null;
+    if (employee && employee.fields.Email) {
+      await emailService.sendLeaveDecisionNotice({
+        employeeEmail: employee.fields.Email,
+        employeeName: employee.fields.Name,
+        request: updated,
+        decision,
+      });
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[leave] decision notice failed:', err.message);
+  }
+
+  return serialize(updated);
+}
+
+/**
+ * In-app approve/reject. The caller (Manager/HR Admin) is authorised here:
+ * a Manager may only decide requests where they are the assigned approver;
+ * HR Admin may decide any.
+ */
+async function decideInApp(requestId, action, caller) {
+  const request = await LeaveRequest.get(requestId);
+  if (!request) throw notFound('Leave request not found');
+
+  const isHrAdmin = caller.role === 'HR Admin';
+  const isAssignedManager = (request.fields.Manager || []).includes(caller.id);
+  if (!isHrAdmin && !isAssignedManager) {
+    throw forbidden('You are not the approver for this request');
+  }
+
+  const decision = action === 'approve' ? 'Approved' : 'Rejected';
+  return applyDecision(request, decision);
+}
+
+/**
+ * Email-link decision, gated purely by the single-use token.
+ */
+async function decideByToken(requestId, token, action) {
+  if (!token) throw badRequest('Missing token', 'MISSING_TOKEN');
+  if (!['approve', 'reject'].includes(action)) {
+    throw badRequest("action must be 'approve' or 'reject'");
+  }
+  const request = await LeaveRequest.get(requestId);
+  if (!request) throw notFound('Leave request not found');
+
+  const stored = request.fields.DecisionToken;
+  if (!stored || !safeEquals(stored, token)) {
+    throw forbidden('Invalid or already-used token', 'TOKEN_INVALID');
+  }
+
+  const decision = action === 'approve' ? 'Approved' : 'Rejected';
+  return applyDecision(request, decision);
+}
+
+async function list({ employeeId, status } = {}) {
+  const rows = await LeaveRequest.query({ employeeId, status });
+  return rows.map(serialize);
+}
+
+async function getById(id) {
+  const rec = await LeaveRequest.get(id);
+  if (!rec) throw notFound('Leave request not found');
+  return serialize(rec);
+}
+
+async function balancesFor(employeeId) {
+  const balance = await LeaveBalance.findForEmployee(employeeId);
+  if (!balance) throw notFound('No leave balance record for employee');
+  return {
+    id: balance.id,
+    employee: balance.fields.Employee || [],
+    annual: Number(balance.fields.Annual || 0),
+    sick: Number(balance.fields.Sick || 0),
+    casual: Number(balance.fields.Casual || 0),
+    lastUpdated: balance.fields.LastUpdated || null,
+  };
+}
+
+module.exports = {
+  submit,
+  decideInApp,
+  decideByToken,
+  list,
+  getById,
+  balancesFor,
+  computeLeaveDays,
+  serialize,
+  LEAVE_TYPES,
+};
