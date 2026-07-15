@@ -64,6 +64,11 @@ const env = {
   // Express "trust proxy" setting — needed for correct client IPs (rate limiting)
   // behind a proxy/load balancer. e.g. "1" (first hop) or "true". Empty = off.
   trustProxy: optional('TRUST_PROXY', ''),
+
+  // Shared secret for the machine-triggered job endpoints (e.g. n8n / pg_cron
+  // calling POST /api/jobs/mark-absent). Distinct from user auth. Empty = the
+  // job endpoints are disabled (503) so they're never left open.
+  jobsSecret: optional('JOBS_SECRET', ''),
 };
 
 env.isProduction = env.nodeEnv === 'production';

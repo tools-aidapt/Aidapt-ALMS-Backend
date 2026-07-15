@@ -21,3 +21,8 @@ run:
     # rate limiter sees real client IPs.
     - name: TRUST_PROXY
       value: "1"
+    # Disable the in-process cron on App Runner (CPU is throttled between
+    # requests, so the timer is unreliable). Trigger jobs externally instead
+    # (n8n / pg_cron) via POST /api/jobs/mark-absent with the X-Job-Secret header.
+    - name: ENABLE_CRON
+      value: "false"

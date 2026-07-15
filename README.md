@@ -49,6 +49,26 @@ and port (4000).
 Supabase is reached over the public internet (the pooler URL), so no VPC
 connector is required.
 
+### Scheduled jobs on App Runner
+
+App Runner throttles CPU between requests, so the in-process `node-cron` timer is
+unreliable (and would double-fire if scaled to >1 instance). `apprunner.yaml`
+therefore sets **`ENABLE_CRON=false`**. Trigger the daily absent-marker
+externally instead:
+
+- Endpoint: `POST /api/jobs/mark-absent` — authenticated by the **`X-Job-Secret`**
+  header matching the `JOBS_SECRET` env var (not user JWT). Optional body
+  `{ "date": "YYYY-MM-DD" }`, defaults to today (PKT). Idempotent.
+- Schedule an **n8n** (or Supabase `pg_cron`) job to call it at **23:30
+  Asia/Karachi** with the `X-Job-Secret` header.
+
+  ```
+  POST https://<service>/api/jobs/mark-absent
+  X-Job-Secret: <JOBS_SECRET>
+  ```
+
+Set `JOBS_SECRET` in the App Runner env (Secrets Manager) alongside the others.
+
 Required env vars are validated at startup (`src/config/env.js`) — the process
 refuses to boot if `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`, or `SUPABASE_JWT_SECRET` are missing.

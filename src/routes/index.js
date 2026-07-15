@@ -11,6 +11,7 @@ const leaveRoutes = require('./leaveRoutes');
 const holidayRoutes = require('./holidayRoutes');
 const adminRoutes = require('./adminRoutes');
 const dashboardRoutes = require('./dashboardRoutes');
+const jobsRoutes = require('./jobsRoutes');
 
 const router = express.Router();
 
@@ -25,5 +26,6 @@ router.use('/leave', leaveRoutes);
 router.use('/holidays', holidayRoutes);
 router.use('/admin', adminRoutes);
 router.use('/dashboard', dashboardRoutes);
+router.use('/jobs', jobsRoutes);
 
 module.exports = router;
