@@ -37,6 +37,9 @@ create table if not exists employees (
   address            text,
   phone_no           text,
   emergency_phone_no text,
+  photo_url          text,
+  employment_status  text not null default 'Full-time'
+                       check (employment_status in ('Probation','Full-time')),
   created_at         timestamptz not null default now()
 );
 create index if not exists employees_manager_idx on employees (manager_id);

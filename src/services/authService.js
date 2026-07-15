@@ -212,6 +212,8 @@ function publicProfile(employee) {
     name: f.Name,
     email: f.Email,
     role: f.Role,
+    photoUrl: f.PhotoUrl || null,
+    employmentStatus: f.EmploymentStatus || 'Full-time',
     manager: f.Manager || [],
     assignedShift: f.AssignedShift || [],
     dateOfJoining: f.DateOfJoining || null,

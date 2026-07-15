@@ -22,6 +22,8 @@ const schemas = {
     shiftId: z.string().optional(),
     dateOfJoining: z.string().optional(),
     monthlySalary: z.number().nonnegative().optional(),
+    photoUrl: z.string().optional(),
+    employmentStatus: z.enum(['Probation', 'Full-time']).optional(),
   }),
   update: z
     .object({
@@ -31,6 +33,8 @@ const schemas = {
       shiftId: z.string().nullable().optional(),
       status: z.enum(['Active', 'Inactive']).optional(),
       monthlySalary: z.number().nonnegative().optional(),
+      photoUrl: z.string().nullable().optional(),
+      employmentStatus: z.enum(['Probation', 'Full-time']).optional(),
     })
     .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
 };
@@ -48,6 +52,8 @@ function serialize(rec, caller) {
     name: f.Name,
     email: f.Email,
     role: f.Role,
+    photoUrl: f.PhotoUrl || null,
+    employmentStatus: f.EmploymentStatus || 'Full-time',
     manager: f.Manager || [],
     assignedShift: f.AssignedShift || [],
     dateOfJoining: f.DateOfJoining || null,
@@ -107,6 +113,8 @@ const create = asyncHandler(async (req, res) => {
     if (body.shiftId) fields.AssignedShift = [body.shiftId];
     if (body.dateOfJoining) fields.DateOfJoining = body.dateOfJoining;
     if (body.monthlySalary !== undefined) fields.MonthlySalary = body.monthlySalary;
+    if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
+    if (body.employmentStatus !== undefined) fields.EmploymentStatus = body.employmentStatus;
 
     const rec = await Employee.createWithId(userId, fields);
 
@@ -148,6 +156,8 @@ const update = asyncHandler(async (req, res) => {
   if (body.shiftId !== undefined) {
     fields.AssignedShift = body.shiftId ? [body.shiftId] : [];
   }
+  if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
+  if (body.employmentStatus !== undefined) fields.EmploymentStatus = body.employmentStatus;
 
   const updated = await Employee.update(rec.id, fields);
   res.json({ data: serialize(updated, req.user) });

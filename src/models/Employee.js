@@ -20,6 +20,8 @@ const Employee = makeModel({
     Address: { col: 'address' },
     PhoneNo: { col: 'phone_no' },
     EmergencyPhoneNo: { col: 'emergency_phone_no' },
+    PhotoUrl: { col: 'photo_url' },
+    EmploymentStatus: { col: 'employment_status' },
   },
 });
 
