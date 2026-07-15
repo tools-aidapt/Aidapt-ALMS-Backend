@@ -22,12 +22,14 @@ const configured = Boolean(webhookUrl);
 const httpClient = axios.create({ timeout: 15000 });
 
 /**
- * POST one email event to n8n.
+ * POST one email event to n8n. All email types use the single configured
+ * webhook (N8N_EMAIL_WEBHOOK_URL); the n8n side branches on `event` /
+ * `emailReason`.
  * @param {string} event  e.g. 'generic' | 'leave.approval_request' | 'auth.password_reset_otp'
  * @param {object} payload rendered + structured fields
- * @param {string} [url]  target webhook (defaults to the general N8N_EMAIL_WEBHOOK_URL)
  */
-async function dispatch(event, payload, url = webhookUrl) {
+async function dispatch(event, payload) {
+  const url = webhookUrl;
   const body = { event, from: env.email.from, ...payload };
 
   if (!url) {
@@ -41,8 +43,24 @@ async function dispatch(event, payload, url = webhookUrl) {
     headers.Authorization = `Bearer ${env.email.n8nWebhookToken}`;
   }
 
-  await httpClient.post(url, body, { headers });
-  return { delivered: true };
+  // eslint-disable-next-line no-console
+  console.log(
+    `[email:webhook] POST event=${event} emailReason=${payload.emailReason || '-'} to=${payload.to || '-'} url=${url}`
+  );
+
+  try {
+    const resp = await httpClient.post(url, body, { headers });
+    // eslint-disable-next-line no-console
+    console.log(`[email:webhook] delivered event=${event} status=${resp.status}`);
+    return { delivered: true, status: resp.status };
+  } catch (err) {
+    const status = err.response ? err.response.status : 'no-response';
+    // eslint-disable-next-line no-console
+    console.error(
+      `[email:webhook] FAILED event=${event} status=${status} error=${err.message}`
+    );
+    throw err;
+  }
 }
 
 /** Generic one-off email (e.g. new-account invite). */
@@ -53,7 +71,7 @@ function sendMail({ to, subject, html, text }) {
 /**
  * Manager approval request with single-use approve/reject links.
  */
-function sendLeaveApprovalRequest({ managerEmail, employeeName, request, token }) {
+function sendLeaveApprovalRequest({ managerEmail, employeeName, employeeEmail, request, token }) {
   const base = env.appBaseUrl.replace(/\/$/, '');
   const link = (action) =>
     `${base}/api/leave/requests/${request.id}/decide?token=${token}&action=${action}`;
@@ -77,7 +95,10 @@ function sendLeaveApprovalRequest({ managerEmail, employeeName, request, token }
   `;
 
   return dispatch('leave.approval_request', {
+    emailReason: 'leave',
     to: managerEmail,
+    employeeName,
+    employeeEmail: employeeEmail || null,
     subject,
     html,
     text: stripHtml(html),
@@ -85,6 +106,8 @@ function sendLeaveApprovalRequest({ managerEmail, employeeName, request, token }
     data: {
       requestId: request.id,
       employeeName,
+      employeeEmail: employeeEmail || null,
+      managerEmail,
       leaveType: request.fields.LeaveType,
       fromDate: request.fields.FromDate,
       toDate: request.fields.ToDate,
@@ -106,13 +129,17 @@ function sendLeaveDecisionNotice({ employeeEmail, employeeName, request, decisio
   `;
 
   return dispatch('leave.decision', {
+    emailReason: 'leave',
     to: employeeEmail,
+    employeeName,
+    employeeEmail: employeeEmail || null,
     subject,
     html,
     text: stripHtml(html),
     data: {
       requestId: request.id,
       employeeName,
+      employeeEmail: employeeEmail || null,
       leaveType: request.fields.LeaveType,
       fromDate: request.fields.FromDate,
       toDate: request.fields.ToDate,
@@ -123,9 +150,10 @@ function sendLeaveDecisionNotice({ employeeEmail, employeeName, request, decisio
 }
 
 /**
- * Password-reset OTP email — dispatched to the dedicated password-reset webhook
- * (N8N_PASSWORD_RESET_WEBHOOK_URL). n8n receives the subject + full content and
- * sends the actual email.
+ * Password-reset OTP email — dispatched to the single n8n webhook
+ * (N8N_EMAIL_WEBHOOK_URL) like every other email type. n8n branches on the
+ * `emailReason: 'OTP'` field, receives the subject + full content, and sends
+ * the actual email.
  */
 function sendPasswordResetOtp({ email, name, otp, expiresMinutes = 10 }) {
   const subject = 'Your ALMS password reset code';
@@ -136,11 +164,16 @@ function sendPasswordResetOtp({ email, name, otp, expiresMinutes = 10 }) {
     <p>It expires in ${expiresMinutes} minutes and can be used once.
        If you didn't request this, you can ignore this email.</p>
   `;
-  return dispatch(
-    'auth.password_reset_otp',
-    { to: email, subject, html, text: stripHtml(html), data: { otp, expiresMinutes } },
-    env.email.passwordResetWebhookUrl
-  );
+  return dispatch('auth.password_reset_otp', {
+    emailReason: 'OTP',
+    to: email,
+    employeeName: name || null,
+    employeeEmail: email,
+    subject,
+    html,
+    text: stripHtml(html),
+    data: { otp, expiresMinutes },
+  });
 }
 
 function stripHtml(html = '') {

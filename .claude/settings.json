@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node \"C:/Users/User/AppData/Local/Temp/claude/e--AIMS-Backend/8deb1364-a911-44f0-aeaa-927f190d4d9b/scratchpad/test-selfheal.js\")",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\")"
+    ]
+  }
+}

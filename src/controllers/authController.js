@@ -58,7 +58,7 @@ const login = asyncHandler(async (req, res) => {
 const register = asyncHandler(async (req, res) => {
   const b = req.body;
 
-  const userId = await authService.createAuthUser({
+  const { userId } = await authService.createAuthUser({
     email: b.email,
     password: b.password,
     name: b.name,

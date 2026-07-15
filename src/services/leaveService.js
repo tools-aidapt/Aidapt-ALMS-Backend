@@ -103,17 +103,32 @@ async function submit(employeeId, { leaveType, fromDate, toDate, reason }) {
     try {
       const manager = await Employee.get(managerId);
       if (manager && manager.fields.Email) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[leave] submitting approval email for request ${rec.id} to manager ${managerId} <${manager.fields.Email}>`
+        );
         await emailService.sendLeaveApprovalRequest({
           managerEmail: manager.fields.Email,
           employeeName: employee.fields.Name,
+          employeeEmail: employee.fields.Email,
           request: rec,
           token,
         });
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[leave] approval email skipped for request ${rec.id}: manager ${managerId} has no Email on record`
+        );
       }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[leave] approval email failed:', err.message);
     }
+  } else {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[leave] approval email skipped for request ${rec.id}: employee ${employeeId} has no assigned Manager`
+    );
   }
 
   return serialize(rec);
@@ -231,6 +246,111 @@ async function decideByToken(requestId, token, action) {
   return applyDecision(request, decision);
 }
 
+/**
+ * Owner edits their own leave request. Allowed only while the request has NOT
+ * been approved (an approved request already deducted balance, so it's locked).
+ * Any edit recomputes Days, returns the request to Pending, and re-issues the
+ * single-use decision token — invalidating any approval link already emailed —
+ * then re-sends the approval request to the manager.
+ */
+async function updateRequest(requestId, employeeId, patch) {
+  const request = await LeaveRequest.get(requestId);
+  if (!request) throw notFound('Leave request not found');
+
+  if (!(request.fields.Employee || []).includes(employeeId)) {
+    throw forbidden('You can only edit your own leave requests');
+  }
+  if (request.fields.Status === 'Approved') {
+    throw conflict('An approved leave request cannot be edited', 'ALREADY_APPROVED');
+  }
+
+  const leaveType = patch.leaveType ?? request.fields.LeaveType;
+  const fromDate = patch.fromDate ?? request.fields.FromDate;
+  const toDate = patch.toDate ?? request.fields.ToDate;
+  const reason = patch.reason ?? request.fields.Reason ?? '';
+
+  if (!LEAVE_TYPES.includes(leaveType)) {
+    throw badRequest(`leaveType must be one of ${LEAVE_TYPES.join(', ')}`);
+  }
+
+  const employee = await Employee.get(employeeId);
+  if (!employee) throw notFound('Employee not found');
+
+  const days = await computeLeaveDays(employee, fromDate, toDate);
+  if (days <= 0) {
+    throw badRequest('Requested range contains no working days', 'NO_WORKING_DAYS');
+  }
+
+  const token = generateDecisionToken();
+  await LeaveRequest.update(requestId, {
+    LeaveType: leaveType,
+    FromDate: fromDate,
+    ToDate: toDate,
+    Days: days,
+    Reason: reason,
+    Status: 'Pending',
+    DecidedAt: null,
+    DecisionToken: token,
+  });
+
+  const updated = await LeaveRequest.get(requestId);
+
+  // Re-send the approval email so the manager acts on the latest details.
+  const managerId = (request.fields.Manager || [])[0] || null;
+  if (managerId) {
+    try {
+      const manager = await Employee.get(managerId);
+      if (manager && manager.fields.Email) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[leave] re-sending approval email for edited request ${requestId} to manager ${managerId} <${manager.fields.Email}>`
+        );
+        await emailService.sendLeaveApprovalRequest({
+          managerEmail: manager.fields.Email,
+          employeeName: employee.fields.Name,
+          employeeEmail: employee.fields.Email,
+          request: updated,
+          token,
+        });
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[leave] approval email skipped for edited request ${requestId}: manager ${managerId} has no Email on record`
+        );
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[leave] approval email failed:', err.message);
+    }
+  } else {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[leave] approval email skipped for edited request ${requestId}: employee ${employeeId} has no assigned Manager`
+    );
+  }
+
+  return serialize(updated);
+}
+
+/**
+ * Owner deletes their own leave request. Allowed only while the request has NOT
+ * been approved.
+ */
+async function deleteRequest(requestId, employeeId) {
+  const request = await LeaveRequest.get(requestId);
+  if (!request) throw notFound('Leave request not found');
+
+  if (!(request.fields.Employee || []).includes(employeeId)) {
+    throw forbidden('You can only delete your own leave requests');
+  }
+  if (request.fields.Status === 'Approved') {
+    throw conflict('An approved leave request cannot be deleted', 'ALREADY_APPROVED');
+  }
+
+  await LeaveRequest.remove(requestId);
+  return { id: requestId, deleted: true };
+}
+
 async function list({ employeeId, status } = {}) {
   const rows = await LeaveRequest.query({ employeeId, status });
   return rows.map(serialize);
@@ -257,6 +377,8 @@ async function balancesFor(employeeId) {
 
 module.exports = {
   submit,
+  updateRequest,
+  deleteRequest,
   decideInApp,
   decideByToken,
   list,

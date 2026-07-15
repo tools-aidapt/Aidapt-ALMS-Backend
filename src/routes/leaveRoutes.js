@@ -19,6 +19,8 @@ router.use(authenticate);
 router.post('/requests', validate(ctrl.schemas.submit), ctrl.submit);
 router.get('/requests', validate(ctrl.schemas.listQuery, 'query'), ctrl.list);
 router.get('/requests/:id', ctrl.getOne);
+router.patch('/requests/:id', validate(ctrl.schemas.update), ctrl.update);
+router.delete('/requests/:id', ctrl.remove);
 router.patch(
   '/requests/:id/approve',
   requireRole(ROLES.MANAGER, ROLES.HR_ADMIN),

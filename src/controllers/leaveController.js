@@ -16,6 +16,16 @@ const schemas = {
     toDate: dateStr,
     reason: z.string().optional(),
   }),
+  update: z
+    .object({
+      leaveType: z.enum(['Annual', 'Sick', 'Casual']).optional(),
+      fromDate: dateStr.optional(),
+      toDate: dateStr.optional(),
+      reason: z.string().optional(),
+    })
+    .refine((obj) => Object.keys(obj).length > 0, {
+      message: 'Provide at least one field to update',
+    }),
   listQuery: z.object({
     employeeId: z.string().optional(),
     status: z.enum(['Pending', 'Approved', 'Rejected']).optional(),
@@ -45,6 +55,16 @@ const getOne = asyncHandler(async (req, res) => {
   const isHrAdmin = req.user.role === ROLES.HR_ADMIN;
   if (!isOwner && !isApprover && !isHrAdmin) throw forbidden();
   res.json({ data: request });
+});
+
+const update = asyncHandler(async (req, res) => {
+  const request = await leaveService.updateRequest(req.params.id, req.user.id, req.body);
+  res.json({ data: request });
+});
+
+const remove = asyncHandler(async (req, res) => {
+  const result = await leaveService.deleteRequest(req.params.id, req.user.id);
+  res.json({ data: result });
 });
 
 const approve = asyncHandler(async (req, res) => {
@@ -83,4 +103,4 @@ const balances = asyncHandler(async (req, res) => {
   res.json({ data });
 });
 
-module.exports = { submit, list, getOne, approve, reject, decide, balances, schemas };
+module.exports = { submit, list, getOne, update, remove, approve, reject, decide, balances, schemas };

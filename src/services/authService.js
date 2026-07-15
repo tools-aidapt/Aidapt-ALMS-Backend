@@ -23,9 +23,31 @@ const genOtp = () => String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
  * JWT secret), which the auth middleware verifies on each request.
  */
 
+/** Find a Supabase auth user by email (case-insensitive), or null. */
+async function findAuthUserByEmail(email) {
+  const target = String(email).trim().toLowerCase();
+  for (let page = 1; page <= 50; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) throw conflict(error.message, 'AUTH_LOOKUP_FAILED');
+    const users = data.users || [];
+    const found = users.find((u) => (u.email || '').toLowerCase() === target);
+    if (found) return found;
+    if (users.length < 200) break; // last page
+  }
+  return null;
+}
+
 /**
  * Create a Supabase auth user (email confirmed so they can sign in immediately).
- * @returns {Promise<string>} the new auth user id
+ *
+ * Self-heals a previously orphaned auth user: if the email already exists in
+ * auth.users but has NO matching employees profile, that record is left over
+ * from a half-finished registration whose rollback failed. Rather than dead-end
+ * with EMAIL_EXISTS, we adopt it — reset the caller-supplied password/name so
+ * the re-registration behaves like a fresh one. A genuine duplicate (auth user
+ * WITH a profile) still throws EMAIL_EXISTS.
+ *
+ * @returns {Promise<{ userId: string, adopted: boolean }>}
  */
 async function createAuthUser({ email, password, name }) {
   const { data, error } = await admin.auth.admin.createUser({
@@ -34,14 +56,36 @@ async function createAuthUser({ email, password, name }) {
     email_confirm: true,
     user_metadata: { name },
   });
-  if (error) {
-    // Duplicate email / weak password etc.
-    if (/already/i.test(error.message)) {
-      throw conflict('An account with that email already exists', 'EMAIL_EXISTS');
-    }
+  if (!error) return { userId: data.user.id, adopted: false };
+
+  // Weak password, invalid email, etc. — not a duplicate.
+  if (!/already/i.test(error.message)) {
     throw conflict(error.message, 'AUTH_CREATE_FAILED');
   }
-  return data.user.id;
+
+  // Email is taken in auth.users. Distinguish a real duplicate from an orphan.
+  const existing = await findAuthUserByEmail(email);
+  if (!existing) {
+    // Couldn't locate it (race / paging miss) — fail safe as a duplicate.
+    throw conflict('An account with that email already exists', 'EMAIL_EXISTS');
+  }
+  const profile = await Employee.get(existing.id);
+  if (profile) {
+    throw conflict('An account with that email already exists', 'EMAIL_EXISTS');
+  }
+
+  // Orphaned auth user — adopt it.
+  const { error: updErr } = await admin.auth.admin.updateUserById(existing.id, {
+    password,
+    email_confirm: true,
+    user_metadata: { name },
+  });
+  if (updErr) throw conflict(updErr.message, 'AUTH_ADOPT_FAILED');
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[auth] adopted orphaned auth user ${existing.id} for ${email} (no employees profile existed)`
+  );
+  return { userId: existing.id, adopted: true };
 }
 
 /** Validate credentials via Supabase and return { token, user }. */
@@ -73,8 +117,11 @@ async function logout(token) {
 async function deleteAuthUser(userId) {
   try {
     await admin.auth.admin.deleteUser(userId);
-  } catch {
-    /* ignore */
+  } catch (err) {
+    // Surface the failure — a swallowed error here is exactly what leaves an
+    // orphaned auth user with no employees profile behind.
+    // eslint-disable-next-line no-console
+    console.error(`[auth] rollback deleteAuthUser failed for ${userId}:`, err.message);
   }
 }
 
