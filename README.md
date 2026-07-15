@@ -26,6 +26,28 @@ cp .env.example .env      # then fill in the values
 npm run dev               # nodemon, or: npm start
 ```
 
+## Deploy (AWS App Runner)
+
+The app listens on `PORT` (default 4000) and binds `0.0.0.0`, so no code change is
+needed. `apprunner.yaml` defines the build (`npm ci`), start (`node src/server.js`),
+and port (4000).
+
+1. **App Runner → Create service → Source: GitHub** → connect this repo, branch
+   `main`. Use the configuration file (`apprunner.yaml`).
+2. **Environment variables** (Configuration → Environment variables) — set all of:
+   `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+   `N8N_EMAIL_WEBHOOK_URL`, `N8N_PASSWORD_RESET_WEBHOOK_URL`, `EMAIL_FROM`,
+   `OFFICE_GEOFENCE_DEFAULT_RADIUS_M`, `APP_BASE_URL`.
+   Put `DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in **AWS Secrets Manager**
+   and reference them; the rest can be plaintext. (`NODE_ENV`, `PORT`,
+   `TRUST_PROXY` come from `apprunner.yaml`.)
+3. **Health check:** HTTP, path `/api/health`.
+4. After the first deploy, set `APP_BASE_URL` to the App Runner service URL and
+   redeploy so email links resolve correctly.
+
+Supabase is reached over the public internet (the pooler URL), so no VPC
+connector is required.
+
 Required env vars are validated at startup (`src/config/env.js`) — the process
 refuses to boot if `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`, or `SUPABASE_JWT_SECRET` are missing.

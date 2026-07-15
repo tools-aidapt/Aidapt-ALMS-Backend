@@ -1,0 +1,23 @@
+# AWS App Runner configuration.
+# Secrets/config (DATABASE_URL, SUPABASE_*, N8N_*, etc.) are NOT set here — add
+# them in the App Runner console (Configuration > Environment variables), using
+# AWS Secrets Manager for DATABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
+version: 1.0
+runtime: nodejs18
+build:
+  commands:
+    build:
+      - npm ci
+run:
+  command: node src/server.js
+  network:
+    port: 4000
+  env:
+    - name: NODE_ENV
+      value: "production"
+    - name: PORT
+      value: "4000"
+    # App Runner is behind a load balancer — trust the first proxy hop so the
+    # rate limiter sees real client IPs.
+    - name: TRUST_PROXY
+      value: "1"
