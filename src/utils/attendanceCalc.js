@@ -6,7 +6,7 @@
  * data layer.
  */
 
-const { pktMinutesOfDay, parseHhMm, round2 } = require('./dateUtils');
+const { pktMinutesOfDay, parseHhMm, minutesBetween, round2 } = require('./dateUtils');
 
 /**
  * Geofence mode from a computed distance and radius.
@@ -50,4 +50,27 @@ function shiftLengthHours(shift) {
   return round2(span / 60);
 }
 
-module.exports = { modeForDistance, computeLateness, shiftLengthHours };
+/**
+ * Worked minutes/hours + overtime from two absolute UTC instants.
+ *
+ * Returns nulls unless BOTH timestamps are present — a missing check-in must
+ * never be coerced to `new Date(null)` (the Unix epoch), which produced the
+ * ~495,000-hour durations. Negative spans (bad edits) clamp to 0.
+ *
+ * @param {string|Date|null} checkInInstant
+ * @param {string|Date|null} checkOutInstant
+ * @param {number|null} shiftLen scheduled shift length in hours (for overtime)
+ * @returns {{workedMinutes: number|null, workedHours: number|null, overtimeHours: number|null}}
+ */
+function computeWorked(checkInInstant, checkOutInstant, shiftLen) {
+  if (!checkInInstant || !checkOutInstant) {
+    return { workedMinutes: null, workedHours: null, overtimeHours: null };
+  }
+  const workedMinutes = Math.max(0, minutesBetween(checkInInstant, checkOutInstant));
+  const workedHours = round2(workedMinutes / 60);
+  const shiftMinutes = shiftLen == null ? null : Math.round(shiftLen * 60);
+  const overtimeMinutes = shiftMinutes == null ? 0 : Math.max(0, workedMinutes - shiftMinutes);
+  return { workedMinutes, workedHours, overtimeHours: round2(overtimeMinutes / 60) };
+}
+
+module.exports = { modeForDistance, computeLateness, shiftLengthHours, computeWorked };

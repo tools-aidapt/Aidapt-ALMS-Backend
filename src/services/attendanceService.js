@@ -11,7 +11,6 @@ const { haversineDistanceMeters } = require('../utils/geo');
 const {
   nowUtcIso,
   todayPktDateStr,
-  minutesBetween,
   formatHoursMinutes,
   pktTimeLabel,
   pktHm,
@@ -23,6 +22,7 @@ const {
   modeForDistance,
   computeLateness,
   shiftLengthHours,
+  computeWorked,
 } = require('../utils/attendanceCalc');
 const { conflict, notFound } = require('../middleware/errorHandler');
 
@@ -120,7 +120,10 @@ async function checkIn(employeeId, { lat, lng, accuracy }) {
 async function checkOut(employeeId) {
   const dateStr = todayPktDateStr();
   const punch = await AttendancePunch.findForEmployeeOnDate(employeeId, dateStr);
-  if (!punch) throw conflict('No check-in found for today', 'NOT_CHECKED_IN');
+  // Must have an actual check-in — never compute worked time from a missing one.
+  if (!punch || !punch.fields.CheckInTime) {
+    throw conflict('No check-in found for today', 'NOT_CHECKED_IN');
+  }
   if (punch.fields.CheckOutTime) {
     throw conflict('Already checked out today', 'ALREADY_CHECKED_OUT');
   }
@@ -128,14 +131,11 @@ async function checkOut(employeeId) {
   const { shift } = await loadEmployeeShift(employeeId);
   const now = nowUtcIso();
 
-  // Work to the exact minute, then derive hours from it (single source of truth).
-  const workedMinutes = minutesBetween(punch.fields.CheckInTime, now);
-  const workedHours = round2(workedMinutes / 60);
-
-  const len = shiftLengthHours(shift);
-  const shiftMinutes = len === null ? null : Math.round(len * 60);
-  const overtimeMinutes = shiftMinutes === null ? 0 : Math.max(0, workedMinutes - shiftMinutes);
-  const overtimeHours = round2(overtimeMinutes / 60);
+  const { workedMinutes, workedHours, overtimeHours } = computeWorked(
+    punch.fields.CheckInTime,
+    now,
+    shiftLengthHours(shift)
+  );
 
   const rec = await AttendancePunch.update(punch.id, {
     CheckOutTime: now,

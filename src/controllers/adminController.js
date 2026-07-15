@@ -4,12 +4,17 @@ const { z } = require('zod');
 const { asyncHandler } = require('../utils/asyncHandler');
 const AttendancePunch = require('../models/AttendancePunch');
 const RegularizationLog = require('../models/RegularizationLog');
+const Employee = require('../models/Employee');
+const Shift = require('../models/Shift');
 const attendanceService = require('../services/attendanceService');
+const { shiftLengthHours, computeWorked } = require('../utils/attendanceCalc');
 const { badRequest, notFound } = require('../middleware/errorHandler');
 
 /**
- * Editable punch fields for regularization, mapped from request keys to the
- * Airtable field name. Only these may be corrected.
+ * Editable punch fields for regularization, mapped from request key to the
+ * field name. Worked hours/minutes/overtime are NOT editable — they are always
+ * derived from the (possibly corrected) check-in/out times, so they can never
+ * be set to a stale or bad value.
  */
 const EDITABLE = {
   checkInTime: 'CheckInTime',
@@ -18,9 +23,6 @@ const EDITABLE = {
   mode: 'Mode',
   isLate: 'IsLate',
   lateByMinutes: 'LateByMinutes',
-  workedHours: 'WorkedHours',
-  workedMinutes: 'WorkedMinutes',
-  overtimeHours: 'OvertimeHours',
 };
 
 const schemas = {
@@ -32,9 +34,6 @@ const schemas = {
       mode: z.enum(['Office', 'Remote In']).optional(),
       isLate: z.boolean().optional(),
       lateByMinutes: z.number().int().nonnegative().optional(),
-      workedHours: z.number().nonnegative().optional(),
-      workedMinutes: z.number().int().nonnegative().optional(),
-      overtimeHours: z.number().nonnegative().optional(),
     })
     .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
   logQuery: z.object({
@@ -58,19 +57,52 @@ const regularizePunch = asyncHandler(async (req, res) => {
   const punch = await AttendancePunch.get(req.params.id);
   if (!punch) throw notFound('Punch not found');
 
+  // Resolve the final timestamps after this edit, and reject the invalid state
+  // of a check-out without a check-in (the source of the epoch-difference bug).
+  const finalCheckIn = 'checkInTime' in req.body ? req.body.checkInTime : punch.fields.CheckInTime;
+  const finalCheckOut = 'checkOutTime' in req.body ? req.body.checkOutTime : punch.fields.CheckOutTime;
+  if (finalCheckOut && !finalCheckIn) {
+    throw badRequest('Cannot set a check-out time without a check-in', 'VALIDATION_ERROR');
+  }
+
   const changes = [];
   const fieldUpdates = {};
 
-  for (const [key, airtableField] of Object.entries(EDITABLE)) {
+  for (const [key, field] of Object.entries(EDITABLE)) {
     if (req.body[key] === undefined) continue;
-    const oldValue = punch.fields[airtableField];
+    const oldValue = punch.fields[field];
     const newValue = req.body[key];
     if (normaliseForCompare(oldValue) === normaliseForCompare(newValue)) continue;
-    fieldUpdates[airtableField] = newValue;
+    fieldUpdates[field] = newValue;
     changes.push({
-      field: airtableField,
+      field,
       oldValue: normaliseForCompare(oldValue),
       newValue: normaliseForCompare(newValue),
+    });
+  }
+
+  // Always re-derive worked/overtime from the final timestamps (guarded — nulls
+  // if either is missing) using the employee's shift length.
+  const employeeId = (punch.fields.Employee || [])[0];
+  let shiftLen = null;
+  if (employeeId) {
+    const employee = await Employee.get(employeeId);
+    const shiftId = employee && (employee.fields.AssignedShift || [])[0];
+    const shift = shiftId ? await Shift.get(shiftId) : null;
+    shiftLen = shiftLengthHours(shift);
+  }
+  const worked = computeWorked(finalCheckIn, finalCheckOut, shiftLen);
+  for (const [field, value] of [
+    ['WorkedMinutes', worked.workedMinutes],
+    ['WorkedHours', worked.workedHours],
+    ['OvertimeHours', worked.overtimeHours],
+  ]) {
+    if (normaliseForCompare(punch.fields[field]) === normaliseForCompare(value)) continue;
+    fieldUpdates[field] = value;
+    changes.push({
+      field,
+      oldValue: normaliseForCompare(punch.fields[field]),
+      newValue: normaliseForCompare(value),
     });
   }
 

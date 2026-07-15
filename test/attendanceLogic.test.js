@@ -6,6 +6,7 @@ const {
   computeLateness,
   shiftLengthHours,
   modeForDistance,
+  computeWorked,
 } = require('../src/utils/attendanceCalc');
 
 const shift = (fields) => ({ id: 'shf1', fields });
@@ -47,4 +48,27 @@ test('modeForDistance: Office within radius, Remote beyond', () => {
   assert.strictEqual(modeForDistance(30, 50), 'Office');
   assert.strictEqual(modeForDistance(50, 50), 'Office'); // boundary inclusive
   assert.strictEqual(modeForDistance(51, 50), 'Remote In');
+});
+
+test('computeWorked: normal day is correct', () => {
+  const r = computeWorked('2026-07-08T05:00:00Z', '2026-07-08T14:30:00Z', 9); // 9.5h vs 9h shift
+  assert.strictEqual(r.workedMinutes, 570);
+  assert.strictEqual(r.workedHours, 9.5);
+  assert.strictEqual(r.overtimeHours, 0.5);
+});
+
+test('computeWorked: missing check-in -> nulls (no epoch bug)', () => {
+  const r = computeWorked(null, '2026-07-08T14:30:00Z', 9);
+  assert.deepStrictEqual(r, { workedMinutes: null, workedHours: null, overtimeHours: null });
+});
+
+test('computeWorked: missing check-out -> nulls', () => {
+  const r = computeWorked('2026-07-08T05:00:00Z', null, 9);
+  assert.deepStrictEqual(r, { workedMinutes: null, workedHours: null, overtimeHours: null });
+});
+
+test('computeWorked: never yields an epoch-scale value', () => {
+  // The old bug: checkout minus null(=epoch) ~ 495,000h. Guard returns null.
+  const r = computeWorked(undefined, '2026-07-08T13:33:00Z', 9);
+  assert.strictEqual(r.workedHours, null);
 });
