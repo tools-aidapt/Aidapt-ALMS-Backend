@@ -7,7 +7,7 @@ const emailService = require('../services/emailService');
 const Employee = require('../models/Employee');
 const LeaveBalance = require('../models/LeaveBalance');
 const env = require('../config/env');
-const { notFound } = require('../middleware/errorHandler');
+const { forbidden } = require('../middleware/errorHandler');
 
 const schemas = {
   login: z.object({
@@ -110,7 +110,9 @@ const logout = asyncHandler(async (req, res) => {
 
 const me = asyncHandler(async (req, res) => {
   const employee = await Employee.get(req.user.id);
-  if (!employee) throw notFound('User not found');
+  if (!employee) {
+    throw forbidden('Your account is not set up. Contact your administrator.', 'NOT_PROVISIONED');
+  }
   res.json({ data: authService.publicProfile(employee) });
 });
 

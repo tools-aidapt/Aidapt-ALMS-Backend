@@ -5,7 +5,7 @@ const { admin, anon } = require('../config/supabase');
 const { query, withTransaction } = require('../config/db');
 const Employee = require('../models/Employee');
 const emailService = require('./emailService');
-const { unauthorized, conflict, badRequest } = require('../middleware/errorHandler');
+const { unauthorized, conflict, badRequest, forbidden } = require('../middleware/errorHandler');
 
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const OTP_MAX_ATTEMPTS = 5;
@@ -52,7 +52,7 @@ async function login(email, password) {
   }
   const employee = await Employee.get(data.user.id);
   if (!employee) {
-    throw unauthorized('No employee profile for this account', 'NO_PROFILE');
+    throw forbidden('Your account is not set up. Contact your administrator.', 'NOT_PROVISIONED');
   }
   if (employee.fields.Status === 'Inactive') {
     throw unauthorized('Account is inactive', 'ACCOUNT_INACTIVE');
