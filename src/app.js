@@ -19,6 +19,11 @@ if (env.trustProxy) {
   app.set('trust proxy', tp);
 }
 
+// Liveness probe for App Runner / load balancers. Registered BEFORE the rate
+// limiter and logger so these frequent pings are cheap, never logged, and can
+// never be rate-limited (a 429 here would fail the health check and the deploy).
+app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
+
 app.use(helmet());
 app.use(cors());
 

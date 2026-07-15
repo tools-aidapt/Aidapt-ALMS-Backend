@@ -41,7 +41,8 @@ and port (4000).
    Put `DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in **AWS Secrets Manager**
    and reference them; the rest can be plaintext. (`NODE_ENV`, `PORT`,
    `TRUST_PROXY` come from `apprunner.yaml`.)
-3. **Health check:** HTTP, path `/api/health`.
+3. **Health check:** HTTP, path `/health` (a dedicated top-level route, outside
+   `/api` — unlogged and never rate-limited, so frequent probes stay cheap).
 4. After the first deploy, set `APP_BASE_URL` to the App Runner service URL and
    redeploy so email links resolve correctly.
 
