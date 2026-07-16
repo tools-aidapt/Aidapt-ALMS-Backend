@@ -37,6 +37,47 @@ function serialize(rec) {
   };
 }
 
+/** Batch-fetch { id -> { name, photoUrl } } for a set of employee ids. */
+async function peopleMap(ids) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) return new Map();
+  const rows = await Employee.selectWhere('id = ANY($1)', [unique]);
+  const map = new Map();
+  for (const e of rows) {
+    map.set(e.id, { name: e.fields.Name || null, photoUrl: e.fields.PhotoUrl || null });
+  }
+  return map;
+}
+
+/**
+ * Attach the employee's and manager's name + photoUrl to serialized leave
+ * records. Batches the lookups so a list of N requests costs one query, not N.
+ */
+async function attachPeople(items) {
+  const ids = [];
+  for (const it of items) {
+    ids.push((it.employee || [])[0], (it.manager || [])[0]);
+  }
+  const people = await peopleMap(ids);
+  return items.map((it) => {
+    const emp = people.get((it.employee || [])[0]);
+    const mgr = people.get((it.manager || [])[0]);
+    return {
+      ...it,
+      employeeName: emp ? emp.name : null,
+      employeePhotoUrl: emp ? emp.photoUrl : null,
+      managerName: mgr ? mgr.name : null,
+      managerPhotoUrl: mgr ? mgr.photoUrl : null,
+    };
+  });
+}
+
+/** Enrich a single serialized leave record with people info. */
+async function withPeople(serialized) {
+  const [one] = await attachPeople([serialized]);
+  return one;
+}
+
 /** Working-day set for an employee, from their assigned shift (fallback Mon–Fri). */
 async function workingDaysFor(employee) {
   const shiftId = (employee.fields.AssignedShift || [])[0];
@@ -131,7 +172,7 @@ async function submit(employeeId, { leaveType, fromDate, toDate, reason }) {
     );
   }
 
-  return serialize(rec);
+  return withPeople(serialize(rec));
 }
 
 // Whitelist of leave-type -> balance column, so it can be interpolated safely.
@@ -204,7 +245,7 @@ async function applyDecision(request, decision) {
     console.error('[leave] decision notice failed:', err.message);
   }
 
-  return serialize(updated);
+  return withPeople(serialize(updated));
 }
 
 /**
@@ -329,7 +370,7 @@ async function updateRequest(requestId, employeeId, patch) {
     );
   }
 
-  return serialize(updated);
+  return withPeople(serialize(updated));
 }
 
 /**
@@ -353,13 +394,13 @@ async function deleteRequest(requestId, employeeId) {
 
 async function list({ employeeId, status } = {}) {
   const rows = await LeaveRequest.query({ employeeId, status });
-  return rows.map(serialize);
+  return attachPeople(rows.map(serialize));
 }
 
 async function getById(id) {
   const rec = await LeaveRequest.get(id);
   if (!rec) throw notFound('Leave request not found');
-  return serialize(rec);
+  return withPeople(serialize(rec));
 }
 
 async function balancesFor(employeeId) {
