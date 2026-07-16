@@ -87,7 +87,9 @@ async function evaluateGeofence(lat, lng) {
 async function checkIn(employeeId, { lat, lng, accuracy }) {
   const dateStr = todayPktDateStr();
   const existing = await AttendancePunch.findForEmployeeOnDate(employeeId, dateStr);
-  if (existing) {
+  // A real check-in already exists -> reject. A placeholder row (e.g. an Absent
+  // marker with no CheckInTime) must NOT block a genuine check-in: upgrade it.
+  if (existing && existing.fields.CheckInTime) {
     throw conflict('Already checked in today', 'ALREADY_CHECKED_IN');
   }
 
@@ -110,7 +112,9 @@ async function checkIn(employeeId, { lat, lng, accuracy }) {
     Status: 'Present',
   };
 
-  const rec = await AttendancePunch.create(fields);
+  const rec = existing
+    ? await AttendancePunch.update(existing.id, fields)
+    : await AttendancePunch.create(fields);
   return serialize(rec);
 }
 

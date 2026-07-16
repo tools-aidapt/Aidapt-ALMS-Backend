@@ -2,7 +2,19 @@
   "permissions": {
     "allow": [
       "Bash(node \"C:/Users/User/AppData/Local/Temp/claude/e--AIMS-Backend/8deb1364-a911-44f0-aeaa-927f190d4d9b/scratchpad/test-selfheal.js\")",
-      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\")"
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\")",
+      "Bash(node -c src/controllers/employeeController.js)",
+      "Bash(node \"C:/Users/User/AppData/Local/Temp/claude/e--AIMS-Backend/8deb1364-a911-44f0-aeaa-927f190d4d9b/scratchpad/test-probation.js\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:4000/health)",
+      "Bash(curl -s -i -X POST http://localhost:4000/api/auth/register -H \"Content-Type: application/json\" -d \"{\\\\\"name\\\\\":\\\\\"Probation Tester\\\\\",\\\\\"email\\\\\":\\\\\"probation-test-curl@example.com\\\\\",\\\\\"password\\\\\":\\\\\"TestPass@123\\\\\",\\\\\"dateOfJoining\\\\\":\\\\\"2026-03-02\\\\\"}\")",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' http://localhost:4000/health)",
+      "Bash(echo \"health: $\\(curl -s -o /dev/null -w '%{http_code}' http://localhost:4000/health 2>/dev/null\\)\")",
+      "Bash(node -c src/routes/employeeRoutes.js)",
+      "Bash(node -e ' *)",
+      "Bash(node \"C:/Users/User/AppData/Local/Temp/claude/e--AIMS-Backend/8deb1364-a911-44f0-aeaa-927f190d4d9b/scratchpad/check-attendance.js\")",
+      "Bash(node -c src/services/dashboardService.js)",
+      "Bash(node -c src/services/attendanceService.js)",
+      "Bash(node \"C:/Users/User/AppData/Local/Temp/claude/e--AIMS-Backend/8deb1364-a911-44f0-aeaa-927f190d4d9b/scratchpad/test-checkin.js\")"
     ]
   }
 }

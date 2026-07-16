@@ -70,6 +70,9 @@ const register = asyncHandler(async (req, res) => {
       Email: b.email,
       Role: 'Employee',
       Status: 'Active',
+      // New self-registered employees start on Probation; HR Admin promotes to
+      // Full-time later.
+      EmploymentStatus: 'Probation',
     };
     if (b.dateOfJoining) fields.DateOfJoining = b.dateOfJoining;
     if (b.phoneNo) fields.PhoneNo = b.phoneNo;

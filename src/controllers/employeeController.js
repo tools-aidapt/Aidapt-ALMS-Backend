@@ -37,6 +37,9 @@ const schemas = {
       employmentStatus: z.enum(['Probation', 'Full-time']).optional(),
     })
     .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
+  setStatus: z.object({
+    status: z.enum(['Active', 'Inactive']),
+  }),
 };
 
 /**
@@ -64,10 +67,10 @@ function serialize(rec, caller) {
   return out;
 }
 
+// HR Admin sees the full directory; a Manager sees only their direct reports.
 const list = asyncHandler(async (req, res) => {
   let records;
   if (req.user.role === ROLES.MANAGER) {
-    // Managers see only their direct reports.
     records = await Employee.findDirectReports(req.user.id);
   } else {
     records = await Employee.list({ sort: [{ field: 'Name', direction: 'asc' }] });
@@ -108,13 +111,14 @@ const create = asyncHandler(async (req, res) => {
       Email: body.email,
       Role: body.role,
       Status: 'Active',
+      // Default new hires to Probation unless HR explicitly sets otherwise.
+      EmploymentStatus: body.employmentStatus || 'Probation',
     };
     if (body.managerId) fields.Manager = [body.managerId];
     if (body.shiftId) fields.AssignedShift = [body.shiftId];
     if (body.dateOfJoining) fields.DateOfJoining = body.dateOfJoining;
     if (body.monthlySalary !== undefined) fields.MonthlySalary = body.monthlySalary;
     if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
-    if (body.employmentStatus !== undefined) fields.EmploymentStatus = body.employmentStatus;
 
     const rec = await Employee.createWithId(userId, fields);
 
@@ -163,12 +167,31 @@ const update = asyncHandler(async (req, res) => {
   res.json({ data: serialize(updated, req.user) });
 });
 
-// Soft-delete: never hard-delete an employee.
+// Activate / deactivate an employee. Deactivating is the soft-delete: an
+// Inactive employee is blocked at login. HR Admin cannot deactivate their own
+// account (lockout guard).
+const setStatus = asyncHandler(async (req, res) => {
+  const rec = await Employee.get(req.params.id);
+  if (!rec) throw notFound('Employee not found');
+
+  const { status } = req.body;
+  if (status === 'Inactive' && rec.id === req.user.id) {
+    throw badRequest('You cannot deactivate your own account', 'CANNOT_SELF_DEACTIVATE');
+  }
+
+  const updated = await Employee.update(rec.id, { Status: status });
+  res.json({ data: serialize(updated, req.user) });
+});
+
+// Soft-delete: never hard-delete an employee (sets Status to Inactive).
 const remove = asyncHandler(async (req, res) => {
   const rec = await Employee.get(req.params.id);
   if (!rec) throw notFound('Employee not found');
+  if (rec.id === req.user.id) {
+    throw badRequest('You cannot deactivate your own account', 'CANNOT_SELF_DEACTIVATE');
+  }
   const updated = await Employee.update(rec.id, { Status: 'Inactive' });
   res.json({ data: serialize(updated, req.user) });
 });
 
-module.exports = { list, getOne, create, update, remove, schemas, serialize };
+module.exports = { list, getOne, create, update, setStatus, remove, schemas, serialize };

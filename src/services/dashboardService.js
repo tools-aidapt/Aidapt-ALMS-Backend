@@ -9,7 +9,10 @@ const { ROLES } = require('../middleware/auth');
 
 /** Shape today's punch for the dashboard (or null if not checked in). */
 function mapTodayPunch(punch) {
-  if (!punch) return null;
+  // A placeholder row (Absent / On Leave / Holiday, e.g. from the nightly
+  // absent-marker) carries no CheckInTime — that is NOT a check-in, so the
+  // dashboard must show the not-checked-in state rather than a phantom one.
+  if (!punch || !punch.fields.CheckInTime) return null;
   const f = punch.fields;
   return {
     checkInTime: pktHm(f.CheckInTime), // "HH:mm" PKT
