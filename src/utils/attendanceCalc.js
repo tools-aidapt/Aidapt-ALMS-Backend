@@ -38,6 +38,40 @@ function computeLateness(shift, checkInInstant) {
 }
 
 /**
+ * After this many late days within a calendar month, that day becomes a Half
+ * Day. Fixed policy (not configurable). The 3rd, 6th, 9th… late day each trip it.
+ */
+const LATE_STRIKE_THRESHOLD = 3;
+
+/**
+ * Which days should be marked Half Day because of accumulated late strikes.
+ *
+ * Walks days in date order, keeping a running late-day count keyed by calendar
+ * month (YYYY-MM) so the counter resets on the 1st even if the input range
+ * spans multiple months. Every time a late day pushes that month's count to a
+ * multiple of LATE_STRIKE_THRESHOLD, that day's date is flagged.
+ *
+ * Pure: derives entirely from current punch lateness, so corrections that clear
+ * a late flag automatically shift the strike forward on the next read.
+ *
+ * @param {Array<{date: string, isLate: boolean}>} dayInfos
+ * @returns {Set<string>} dates (YYYY-MM-DD) to mark Half Day
+ */
+function lateStrikeHalfDayDates(dayInfos) {
+  const result = new Set();
+  const countByMonth = new Map();
+  const ordered = [...dayInfos].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  for (const { date, isLate } of ordered) {
+    if (!isLate) continue;
+    const month = date.slice(0, 7);
+    const next = (countByMonth.get(month) || 0) + 1;
+    countByMonth.set(month, next);
+    if (next % LATE_STRIKE_THRESHOLD === 0) result.add(date);
+  }
+  return result;
+}
+
+/**
  * Shift length in hours from StartTime/EndTime; null if unparseable.
  * Supports overnight shifts (end < start).
  */
@@ -73,4 +107,11 @@ function computeWorked(checkInInstant, checkOutInstant, shiftLen) {
   return { workedMinutes, workedHours, overtimeHours: round2(overtimeMinutes / 60) };
 }
 
-module.exports = { modeForDistance, computeLateness, shiftLengthHours, computeWorked };
+module.exports = {
+  modeForDistance,
+  computeLateness,
+  shiftLengthHours,
+  computeWorked,
+  lateStrikeHalfDayDates,
+  LATE_STRIKE_THRESHOLD,
+};

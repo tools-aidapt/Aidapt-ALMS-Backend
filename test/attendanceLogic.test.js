@@ -7,6 +7,7 @@ const {
   shiftLengthHours,
   modeForDistance,
   computeWorked,
+  lateStrikeHalfDayDates,
 } = require('../src/utils/attendanceCalc');
 
 const shift = (fields) => ({ id: 'shf1', fields });
@@ -71,4 +72,48 @@ test('computeWorked: never yields an epoch-scale value', () => {
   // The old bug: checkout minus null(=epoch) ~ 495,000h. Guard returns null.
   const r = computeWorked(undefined, '2026-07-08T13:33:00Z', 9);
   assert.strictEqual(r.workedHours, null);
+});
+
+const dayInfo = (date, isLate) => ({ date, isLate });
+
+test('lateStrikeHalfDayDates: fewer than 3 lates -> none', () => {
+  const set = lateStrikeHalfDayDates([
+    dayInfo('2026-07-01', true),
+    dayInfo('2026-07-02', true),
+    dayInfo('2026-07-03', false),
+  ]);
+  assert.strictEqual(set.size, 0);
+});
+
+test('lateStrikeHalfDayDates: the 3rd and 6th late day are flagged', () => {
+  const set = lateStrikeHalfDayDates([
+    dayInfo('2026-07-01', true), // 1
+    dayInfo('2026-07-02', false),
+    dayInfo('2026-07-05', true), // 2
+    dayInfo('2026-07-09', true), // 3 -> half day
+    dayInfo('2026-07-12', true), // 4
+    dayInfo('2026-07-15', true), // 5
+    dayInfo('2026-07-20', true), // 6 -> half day
+  ]);
+  assert.deepStrictEqual([...set].sort(), ['2026-07-09', '2026-07-20']);
+});
+
+test('lateStrikeHalfDayDates: counter resets each calendar month', () => {
+  const set = lateStrikeHalfDayDates([
+    dayInfo('2026-07-28', true), // Jul 1
+    dayInfo('2026-07-29', true), // Jul 2
+    dayInfo('2026-08-01', true), // Aug 1 (reset)
+    dayInfo('2026-08-04', true), // Aug 2
+    dayInfo('2026-08-06', true), // Aug 3 -> half day
+  ]);
+  assert.deepStrictEqual([...set], ['2026-08-06']);
+});
+
+test('lateStrikeHalfDayDates: unordered input still flags the 3rd late chronologically', () => {
+  const set = lateStrikeHalfDayDates([
+    dayInfo('2026-07-09', true),
+    dayInfo('2026-07-01', true),
+    dayInfo('2026-07-05', true),
+  ]);
+  assert.deepStrictEqual([...set], ['2026-07-09']);
 });

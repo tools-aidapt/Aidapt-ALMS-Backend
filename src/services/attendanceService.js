@@ -23,6 +23,7 @@ const {
   computeLateness,
   shiftLengthHours,
   computeWorked,
+  lateStrikeHalfDayDates,
 } = require('../utils/attendanceCalc');
 const { conflict, notFound } = require('../middleware/errorHandler');
 
@@ -211,6 +212,10 @@ function cellStatus(dateStr, punch, ctx) {
     ) {
       return 'Half Day';
     }
+    // Late-strike penalty: every 3rd late day in the month is a Half Day.
+    if (ctx.strikeHalfDaySet && ctx.strikeHalfDaySet.has(dateStr)) {
+      return 'Half Day';
+    }
     return 'Present'; // attended — location & lateness carried separately
   }
 
@@ -307,12 +312,21 @@ async function overview({ employeeId, from, to } = {}) {
     }
   }
 
+  // Late-strike Half Days: derived from current punch lateness, reset per month.
+  const strikeHalfDaySet = lateStrikeHalfDayDates(
+    rows.map((r) => ({
+      date: String(r.fields.Date).slice(0, 10),
+      isLate: Boolean(r.fields.IsLate),
+    }))
+  );
+
   const ctx = {
     today,
     workingDays: new Set(workingDaysList),
     holidaySet,
     leaveSet,
     shiftLength: shiftLengthHours(shift),
+    strikeHalfDaySet,
   };
 
   // Index punches by their date for the per-day walk.
@@ -322,6 +336,7 @@ async function overview({ employeeId, from, to } = {}) {
   const counts = {
     present: 0, absent: 0, onLeave: 0, holiday: 0,
     late: 0, office: 0, remoteIn: 0, recordedDays: rows.length,
+    lateStrikeHalfDays: strikeHalfDaySet.size,
   };
   let totalWorkedMinutes = 0;
   let totalOvertimeHours = 0;
