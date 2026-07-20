@@ -2,6 +2,7 @@
 
 const axios = require('axios');
 const env = require('../config/env');
+const { pktTimeLabel } = require('../utils/dateUtils');
 
 /**
  * Email dispatch via n8n.
@@ -119,6 +120,53 @@ function sendLeaveApprovalRequest({ managerEmail, employeeName, employeeEmail, r
   });
 }
 
+/**
+ * Notify the manager that an employee submitted a regularization request.
+ * Regularization is approved in-app (no token link), so this points the manager
+ * to the app to review their approval queue.
+ */
+function sendRegularizationApprovalRequest({ managerEmail, employeeName, employeeEmail, request }) {
+  const base = env.appBaseUrl.replace(/\/$/, '');
+  const f = request.fields;
+  const checkIn = pktTimeLabel(f.RequestedCheckInTime) || '—';
+  const checkOut = pktTimeLabel(f.RequestedCheckOutTime) || '—';
+  const subject = `Regularization request from ${employeeName} (${f.Date})`;
+  const html = `
+    <p>${escapeHtml(employeeName)} has requested an attendance regularization.</p>
+    <ul>
+      <li>Date: ${f.Date}</li>
+      <li>Requested check-in: ${checkIn}</li>
+      <li>Requested check-out: ${checkOut}</li>
+      <li>Reason: ${escapeHtml(f.Reason || '—')}</li>
+    </ul>
+    <p>Log in to review and approve or reject: <a href="${base}">${base}</a></p>
+  `;
+
+  return dispatch('regularization.approval_request', {
+    emailReason: 'regularization',
+    to: managerEmail,
+    employeeName,
+    employeeEmail: employeeEmail || null,
+    subject,
+    html,
+    text: stripHtml(html),
+    // Structured data so the n8n workflow can re-template if preferred.
+    data: {
+      requestId: request.id,
+      employeeName,
+      employeeEmail: employeeEmail || null,
+      managerEmail,
+      date: f.Date,
+      requestedCheckInTime: f.RequestedCheckInTime || null,
+      requestedCheckOutTime: f.RequestedCheckOutTime || null,
+      requestedCheckInPkt: pktTimeLabel(f.RequestedCheckInTime) || null,
+      requestedCheckOutPkt: pktTimeLabel(f.RequestedCheckOutTime) || null,
+      reason: f.Reason || '',
+      reviewUrl: base,
+    },
+  });
+}
+
 /** Notify the employee of the decision on their leave request. */
 function sendLeaveDecisionNotice({ employeeEmail, employeeName, request, decision }) {
   const subject = `Your leave request was ${decision.toLowerCase()}`;
@@ -192,6 +240,7 @@ module.exports = {
   sendMail,
   sendLeaveApprovalRequest,
   sendLeaveDecisionNotice,
+  sendRegularizationApprovalRequest,
   sendPasswordResetOtp,
   n8nConfigured: configured,
 };

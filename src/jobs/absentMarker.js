@@ -5,46 +5,73 @@ const Employee = require('../models/Employee');
 const Shift = require('../models/Shift');
 const AttendancePunch = require('../models/AttendancePunch');
 const holidayService = require('../services/holidayService');
-const { todayPktDateStr, dowForDateStr } = require('../utils/dateUtils');
+const { todayPktDateStr, dowForDateStr, nowUtcIso } = require('../utils/dateUtils');
+const { shiftLengthHours, computeWorked } = require('../utils/attendanceCalc');
+
+const DEFAULT_WORKING_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
 /**
- * Mark employees Absent for a given PKT date when:
- *  - the date is a working day for their shift,
- *  - it is not a public holiday,
- *  - and they have no AttendancePunch row for the day.
+ * End-of-day reconciliation for a given PKT date:
  *
- * Employees already on approved leave get an "On Leave" punch instead. (Leave
- * approval does not create punches itself, so this job reconciles them.)
+ *  1. AUTO CHECK-OUT — any employee who checked in but never checked out has
+ *     their punch closed (CheckOutTime = now, worked hours + overtime computed
+ *     exactly like a manual check-out). Runs on every day, holidays included,
+ *     since a forgotten check-out should always be closed. Only applied when
+ *     reconciling *today* — backfilling a past date must not stamp "now" onto
+ *     it, which would corrupt worked-hour totals.
  *
- * Idempotent: re-running does nothing for employees that already have a row.
+ *  2. MARK ABSENT — employees with no punch row at all are marked Absent, but
+ *     only when the date is a working day for their shift and not a public
+ *     holiday.
+ *
+ * Idempotent: employees that already have a closed row are left untouched.
  */
 async function markAbsentees(dateStr = todayPktDateStr()) {
   const holidays = await holidayService.holidayDateSet(dateStr, dateStr);
-  if (holidays.has(dateStr)) {
-    return { date: dateStr, skipped: 'holiday', marked: 0 };
-  }
+  const isHoliday = holidays.has(dateStr);
+  const isToday = dateStr === todayPktDateStr();
 
   const dow = dowForDateStr(dateStr);
   const employees = await Employee.selectWhere("status = 'Active'", [], 'ORDER BY name ASC');
 
-  // Cache shift working-days to avoid refetching per employee.
+  // Cache shift records to avoid refetching per employee.
   const shiftCache = new Map();
   let marked = 0;
+  let checkedOut = 0;
 
   for (const emp of employees) {
     const shiftId = (emp.fields.AssignedShift || [])[0];
-    let workingDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-    if (shiftId) {
-      if (!shiftCache.has(shiftId)) {
-        const shift = await Shift.get(shiftId);
-        shiftCache.set(shiftId, (shift && shift.fields.WorkingDays) || workingDays);
-      }
-      workingDays = shiftCache.get(shiftId);
+    if (shiftId && !shiftCache.has(shiftId)) {
+      shiftCache.set(shiftId, await Shift.get(shiftId));
     }
-    if (!workingDays.includes(dow)) continue; // not a working day for this shift
+    const shift = shiftId ? shiftCache.get(shiftId) : null;
+    const workingDays = (shift && shift.fields.WorkingDays) || DEFAULT_WORKING_DAYS;
 
     const existing = await AttendancePunch.findForEmployeeOnDate(emp.id, dateStr);
-    if (existing) continue;
+
+    // 1. Auto check-out: checked in but never checked out.
+    if (isToday && existing && existing.fields.CheckInTime && !existing.fields.CheckOutTime) {
+      const now = nowUtcIso();
+      const { workedMinutes, workedHours, overtimeHours } = computeWorked(
+        existing.fields.CheckInTime,
+        now,
+        shiftLengthHours(shift)
+      );
+      await AttendancePunch.update(existing.id, {
+        CheckOutTime: now,
+        WorkedHours: workedHours,
+        WorkedMinutes: workedMinutes,
+        OvertimeHours: overtimeHours,
+      });
+      checkedOut += 1;
+      continue;
+    }
+
+    if (existing) continue; // already has a row (checked out / absent / leave)
+
+    // 2. Mark absent — only on a working, non-holiday day.
+    if (isHoliday) continue;
+    if (!workingDays.includes(dow)) continue;
 
     await AttendancePunch.create({
       Employee: [emp.id],
@@ -54,7 +81,7 @@ async function markAbsentees(dateStr = todayPktDateStr()) {
     marked += 1;
   }
 
-  return { date: dateStr, marked };
+  return { date: dateStr, marked, checkedOut, skipped: isHoliday ? 'holiday' : undefined };
 }
 
 /**

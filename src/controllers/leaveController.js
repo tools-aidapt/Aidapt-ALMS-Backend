@@ -34,6 +34,15 @@ const schemas = {
     token: z.string().min(1),
     action: z.enum(['approve', 'reject']),
   }),
+  setBalance: z
+    .object({
+      annual: z.number().nonnegative().optional(),
+      sick: z.number().nonnegative().optional(),
+      casual: z.number().nonnegative().optional(),
+    })
+    .refine((o) => Object.keys(o).length > 0, {
+      message: 'Provide at least one of annual, sick, casual',
+    }),
 };
 
 const submit = asyncHandler(async (req, res) => {
@@ -103,4 +112,10 @@ const balances = asyncHandler(async (req, res) => {
   res.json({ data });
 });
 
-module.exports = { submit, list, getOne, update, remove, approve, reject, decide, balances, schemas };
+// HR Admin sets an employee's leave balance (absolute values).
+const setBalance = asyncHandler(async (req, res) => {
+  const data = await leaveService.setBalance(req.params.employeeId, req.body);
+  res.json({ data });
+});
+
+module.exports = { submit, list, getOne, update, remove, approve, reject, decide, balances, setBalance, schemas };

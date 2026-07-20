@@ -14,7 +14,9 @@
       "Bash(node \"C:/Users/User/AppData/Local/Temp/claude/e--AIMS-Backend/8deb1364-a911-44f0-aeaa-927f190d4d9b/scratchpad/check-attendance.js\")",
       "Bash(node -c src/services/dashboardService.js)",
       "Bash(node -c src/services/attendanceService.js)",
-      "Bash(node \"C:/Users/User/AppData/Local/Temp/claude/e--AIMS-Backend/8deb1364-a911-44f0-aeaa-927f190d4d9b/scratchpad/test-checkin.js\")"
+      "Bash(node \"C:/Users/User/AppData/Local/Temp/claude/e--AIMS-Backend/8deb1364-a911-44f0-aeaa-927f190d4d9b/scratchpad/test-checkin.js\")",
+      "Bash(node -e \"console.log\\(require\\('pg/package.json'\\).version\\)\")",
+      "Bash(psql --version)"
     ]
   }
 }

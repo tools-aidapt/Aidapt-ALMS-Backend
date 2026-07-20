@@ -403,9 +403,7 @@ async function getById(id) {
   return withPeople(serialize(rec));
 }
 
-async function balancesFor(employeeId) {
-  const balance = await LeaveBalance.findForEmployee(employeeId);
-  if (!balance) throw notFound('No leave balance record for employee');
+function serializeBalance(balance) {
   return {
     id: balance.id,
     employee: balance.fields.Employee || [],
@@ -414,6 +412,38 @@ async function balancesFor(employeeId) {
     casual: Number(balance.fields.Casual || 0),
     lastUpdated: balance.fields.LastUpdated || null,
   };
+}
+
+async function balancesFor(employeeId) {
+  const balance = await LeaveBalance.findForEmployee(employeeId);
+  if (!balance) throw notFound('No leave balance record for employee');
+  return serializeBalance(balance);
+}
+
+/**
+ * HR Admin sets an employee's leave balance (absolute values). Any of
+ * annual/sick/casual may be provided; omitted ones are left unchanged. Creates
+ * the balance row if the employee never had one. The last_updated trigger keeps
+ * the timestamp fresh.
+ */
+async function setBalance(employeeId, patch) {
+  const employee = await Employee.get(employeeId);
+  if (!employee) throw notFound('Employee not found');
+
+  const fields = {};
+  if (patch.annual !== undefined) fields.Annual = patch.annual;
+  if (patch.sick !== undefined) fields.Sick = patch.sick;
+  if (patch.casual !== undefined) fields.Casual = patch.casual;
+  if (!Object.keys(fields).length) {
+    throw badRequest('Provide at least one of annual, sick, casual');
+  }
+
+  const existing = await LeaveBalance.findForEmployee(employeeId);
+  const balance = existing
+    ? await LeaveBalance.update(existing.id, fields)
+    : await LeaveBalance.create({ Employee: [employeeId], Annual: 0, Sick: 0, Casual: 0, ...fields });
+
+  return serializeBalance(balance);
 }
 
 module.exports = {
@@ -425,6 +455,7 @@ module.exports = {
   list,
   getById,
   balancesFor,
+  setBalance,
   computeLeaveDays,
   serialize,
   LEAVE_TYPES,

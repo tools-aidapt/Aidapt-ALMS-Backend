@@ -154,6 +154,27 @@ create table if not exists password_reset_tokens (
 );
 create index if not exists prt_employee_idx on password_reset_tokens (employee_id);
 
+-- ---------------------------------------------------------------------------
+-- Regularization requests (employee-submitted punch corrections, manager-approved)
+-- ---------------------------------------------------------------------------
+create table if not exists regularization_requests (
+  id                       uuid primary key default gen_random_uuid(),
+  employee_id              uuid not null references employees (id) on delete cascade,
+  date                     date not null,
+  requested_check_in_time  timestamptz,
+  requested_check_out_time timestamptz,
+  reason                   text,
+  status                   text not null default 'Pending'
+                             check (status in ('Pending','Approved','Rejected')),
+  manager_id               uuid references employees (id) on delete set null,
+  punch_id                 uuid references attendance_punches (id) on delete set null,
+  applied_at               timestamptz not null default now(),
+  decided_at               timestamptz
+);
+create index if not exists regreq_employee_idx on regularization_requests (employee_id);
+create index if not exists regreq_manager_idx on regularization_requests (manager_id);
+create index if not exists regreq_status_idx on regularization_requests (status);
+
 -- Keep leave_balances.last_updated fresh on every update.
 create or replace function touch_last_updated() returns trigger as $$
 begin

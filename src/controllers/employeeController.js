@@ -35,11 +35,31 @@ const schemas = {
       monthlySalary: z.number().nonnegative().optional(),
       photoUrl: z.string().nullable().optional(),
       employmentStatus: z.enum(['Probation', 'Full-time']).optional(),
+      // Personal details — HR Admin may correct these on an employee's behalf.
+      phoneNo: z.string().nullable().optional(),
+      emergencyPhoneNo: z.string().nullable().optional(),
+      address: z.string().nullable().optional(),
+      bankName: z.string().nullable().optional(),
+      bankAccountNo: z.string().nullable().optional(),
     })
     .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
   setStatus: z.object({
     status: z.enum(['Active', 'Inactive']),
   }),
+  // Self-service edit: an employee may change only their own personal details.
+  // Deliberately excludes role, status, employmentStatus, monthlySalary,
+  // dateOfJoining, managerId, shiftId and email — those stay HR/auth controlled.
+  updateSelf: z
+    .object({
+      name: z.string().min(1).optional(),
+      photoUrl: z.string().nullable().optional(),
+      phoneNo: z.string().nullable().optional(),
+      emergencyPhoneNo: z.string().nullable().optional(),
+      address: z.string().nullable().optional(),
+      bankName: z.string().nullable().optional(),
+      bankAccountNo: z.string().nullable().optional(),
+    })
+    .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
 };
 
 /**
@@ -48,7 +68,9 @@ const schemas = {
  */
 function serialize(rec, caller) {
   const f = rec.fields;
-  const canSeeSalary =
+  // Salary and personal contact/bank details are private: only the employee
+  // themselves or an HR Admin may see them.
+  const canSeePrivate =
     caller && (caller.role === ROLES.HR_ADMIN || caller.id === rec.id);
   const out = {
     id: rec.id,
@@ -63,7 +85,14 @@ function serialize(rec, caller) {
     status: f.Status || null,
     createdAt: f.CreatedAt || rec.createdTime,
   };
-  if (canSeeSalary) out.monthlySalary = f.MonthlySalary ?? null;
+  if (canSeePrivate) {
+    out.monthlySalary = f.MonthlySalary ?? null;
+    out.phoneNo = f.PhoneNo || null;
+    out.emergencyPhoneNo = f.EmergencyPhoneNo || null;
+    out.address = f.Address || null;
+    out.bankName = f.BankName || null;
+    out.bankAccountNo = f.BankAccountNo || null;
+  }
   return out;
 }
 
@@ -162,6 +191,31 @@ const update = asyncHandler(async (req, res) => {
   }
   if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
   if (body.employmentStatus !== undefined) fields.EmploymentStatus = body.employmentStatus;
+  if (body.phoneNo !== undefined) fields.PhoneNo = body.phoneNo;
+  if (body.emergencyPhoneNo !== undefined) fields.EmergencyPhoneNo = body.emergencyPhoneNo;
+  if (body.address !== undefined) fields.Address = body.address;
+  if (body.bankName !== undefined) fields.BankName = body.bankName;
+  if (body.bankAccountNo !== undefined) fields.BankAccountNo = body.bankAccountNo;
+
+  const updated = await Employee.update(rec.id, fields);
+  res.json({ data: serialize(updated, req.user) });
+});
+
+// Self-service profile edit. Any authenticated employee may update their OWN
+// personal details only (never role/status/salary/employment/shift/manager).
+const updateSelf = asyncHandler(async (req, res) => {
+  const rec = await Employee.get(req.user.id);
+  if (!rec) throw notFound('Employee not found');
+
+  const body = req.body;
+  const fields = {};
+  if (body.name !== undefined) fields.Name = body.name;
+  if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
+  if (body.phoneNo !== undefined) fields.PhoneNo = body.phoneNo;
+  if (body.emergencyPhoneNo !== undefined) fields.EmergencyPhoneNo = body.emergencyPhoneNo;
+  if (body.address !== undefined) fields.Address = body.address;
+  if (body.bankName !== undefined) fields.BankName = body.bankName;
+  if (body.bankAccountNo !== undefined) fields.BankAccountNo = body.bankAccountNo;
 
   const updated = await Employee.update(rec.id, fields);
   res.json({ data: serialize(updated, req.user) });
@@ -194,4 +248,4 @@ const remove = asyncHandler(async (req, res) => {
   res.json({ data: serialize(updated, req.user) });
 });
 
-module.exports = { list, getOne, create, update, setStatus, remove, schemas, serialize };
+module.exports = { list, getOne, create, update, updateSelf, setStatus, remove, schemas, serialize };

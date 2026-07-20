@@ -32,5 +32,11 @@ router.patch(
   ctrl.reject
 );
 router.get('/balances/:employeeId', ctrl.balances);
+router.patch(
+  '/balances/:employeeId',
+  requireRole(ROLES.HR_ADMIN),
+  validate(ctrl.schemas.setBalance),
+  ctrl.setBalance
+);
 
 module.exports = router;
