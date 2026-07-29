@@ -8,29 +8,43 @@ const {
   modeForDistance,
   computeWorked,
   lateStrikeHalfDayDates,
+  buildStrikeItems,
+  IMMEDIATE_STRIKE_REASON,
 } = require('../src/utils/attendanceCalc');
 
 const shift = (fields) => ({ id: 'shf1', fields });
 
 test('computeLateness: on-time within grace is not late', () => {
-  const s = shift({ StartTime: '09:00', GraceMinutes: 15 });
-  // 09:10 PKT == 04:10Z
-  const r = computeLateness(s, '2026-07-08T04:10:00Z');
+  const s = shift({ StartTime: '10:00', GraceMinutes: 15 });
+  // 10:10 PKT == 05:10Z
+  const r = computeLateness(s, '2026-07-08T05:10:00Z');
   assert.strictEqual(r.isLate, false);
   assert.strictEqual(r.lateByMinutes, 0);
+  assert.strictEqual(r.isImmediateStrike, false);
 });
 
-test('computeLateness: past grace is late by the overage', () => {
-  const s = shift({ StartTime: '09:00', GraceMinutes: 15 });
-  // 09:25 PKT == 04:25Z -> 10 min past the 09:15 allowance
-  const r = computeLateness(s, '2026-07-08T04:25:00Z');
+test('computeLateness: past grace but before +30 is late only', () => {
+  const s = shift({ StartTime: '10:00', GraceMinutes: 15 });
+  // 10:25 PKT == 05:25Z -> late by 10, not yet immediate strike
+  const r = computeLateness(s, '2026-07-08T05:25:00Z');
   assert.strictEqual(r.isLate, true);
   assert.strictEqual(r.lateByMinutes, 10);
+  assert.strictEqual(r.isImmediateStrike, false);
+});
+
+test('computeLateness: after start+30 is late and immediate strike', () => {
+  const s = shift({ StartTime: '10:00', GraceMinutes: 15 });
+  // 10:31 PKT == 05:31Z
+  const r = computeLateness(s, '2026-07-08T05:31:00Z');
+  assert.strictEqual(r.isLate, true);
+  assert.strictEqual(r.lateByMinutes, 16);
+  assert.strictEqual(r.isImmediateStrike, true);
 });
 
 test('computeLateness: no shift -> not late', () => {
   const r = computeLateness(null, '2026-07-08T09:00:00Z');
   assert.strictEqual(r.isLate, false);
+  assert.strictEqual(r.isImmediateStrike, false);
 });
 
 test('shiftLengthHours: standard 9-18 shift', () => {
@@ -74,7 +88,13 @@ test('computeWorked: never yields an epoch-scale value', () => {
   assert.strictEqual(r.workedHours, null);
 });
 
-const dayInfo = (date, isLate) => ({ date, isLate });
+const dayInfo = (date, isLate, isImmediateStrike = false, checkInTime = null) => ({
+  date,
+  isLate,
+  isImmediateStrike,
+  checkInTime,
+  checkInTimePkt: checkInTime ? `PKT:${checkInTime}` : null,
+});
 
 test('lateStrikeHalfDayDates: fewer than 3 lates -> none', () => {
   const set = lateStrikeHalfDayDates([
@@ -85,35 +105,108 @@ test('lateStrikeHalfDayDates: fewer than 3 lates -> none', () => {
   assert.strictEqual(set.size, 0);
 });
 
-test('lateStrikeHalfDayDates: the 3rd and 6th late day are flagged', () => {
-  const set = lateStrikeHalfDayDates([
+test('buildStrikeItems: the 3rd and 6th late day become strike items', () => {
+  const items = buildStrikeItems([
     dayInfo('2026-07-01', true), // 1
     dayInfo('2026-07-02', false),
     dayInfo('2026-07-05', true), // 2
-    dayInfo('2026-07-09', true), // 3 -> half day
+    dayInfo('2026-07-09', true), // 3 -> strike
     dayInfo('2026-07-12', true), // 4
     dayInfo('2026-07-15', true), // 5
-    dayInfo('2026-07-20', true), // 6 -> half day
+    dayInfo('2026-07-20', true), // 6 -> strike
   ]);
-  assert.deepStrictEqual([...set].sort(), ['2026-07-09', '2026-07-20']);
+  assert.deepStrictEqual(
+    items.map((i) => i.date),
+    ['2026-07-09', '2026-07-20']
+  );
 });
 
-test('lateStrikeHalfDayDates: counter resets each calendar month', () => {
-  const set = lateStrikeHalfDayDates([
+test('buildStrikeItems: late counter resets each calendar month', () => {
+  const items = buildStrikeItems([
     dayInfo('2026-07-28', true), // Jul 1
     dayInfo('2026-07-29', true), // Jul 2
     dayInfo('2026-08-01', true), // Aug 1 (reset)
     dayInfo('2026-08-04', true), // Aug 2
-    dayInfo('2026-08-06', true), // Aug 3 -> half day
+    dayInfo('2026-08-06', true), // Aug 3 -> strike
   ]);
-  assert.deepStrictEqual([...set], ['2026-08-06']);
+  assert.deepStrictEqual(
+    items.map((i) => i.date),
+    ['2026-08-06']
+  );
 });
 
-test('lateStrikeHalfDayDates: unordered input still flags the 3rd late chronologically', () => {
-  const set = lateStrikeHalfDayDates([
+test('buildStrikeItems: unordered input still flags the 3rd late chronologically', () => {
+  const items = buildStrikeItems([
     dayInfo('2026-07-09', true),
     dayInfo('2026-07-01', true),
     dayInfo('2026-07-05', true),
   ]);
+  assert.deepStrictEqual(
+    items.map((i) => i.date),
+    ['2026-07-09']
+  );
+});
+
+test('lateStrikeHalfDayDates: single immediate strike is not Half Day yet', () => {
+  const set = lateStrikeHalfDayDates([
+    dayInfo('2026-07-01', true, true),
+    dayInfo('2026-07-02', true, false),
+  ]);
+  assert.strictEqual(set.size, 0);
+});
+
+test('lateStrikeHalfDayDates: Half Day only on every 3rd strike day', () => {
+  const set = lateStrikeHalfDayDates([
+    dayInfo('2026-07-01', true, true), // strike 1
+    dayInfo('2026-07-05', true, true), // strike 2
+    dayInfo('2026-07-09', true, true), // strike 3 -> Half Day
+    dayInfo('2026-07-12', true, true), // strike 4
+  ]);
   assert.deepStrictEqual([...set], ['2026-07-09']);
+});
+
+test('buildStrikeItems: monthly reason for 3rd late only', () => {
+  const items = buildStrikeItems([
+    dayInfo('2026-07-01', true),
+    dayInfo('2026-07-05', true),
+    dayInfo('2026-07-09', true),
+  ]);
+  assert.strictEqual(items.length, 1);
+  assert.strictEqual(items[0].date, '2026-07-09');
+  assert.match(items[0].reason, /3rd late day/);
+});
+
+test('lateStrikeHalfDayDates: one monthly strike alone is not Half Day', () => {
+  // 3 late days => 1 strike item; Half Day needs 3 strikes
+  const set = lateStrikeHalfDayDates([
+    dayInfo('2026-07-01', true),
+    dayInfo('2026-07-05', true),
+    dayInfo('2026-07-09', true),
+  ]);
+  assert.strictEqual(set.size, 0);
+});
+
+test('buildStrikeItems: immediate strike has dedicated reason and check-in time', () => {
+  const items = buildStrikeItems([
+    dayInfo('2026-07-01', true, true, '2026-07-01T05:31:00Z'),
+  ]);
+  assert.deepStrictEqual(items, [
+    {
+      date: '2026-07-01',
+      reason: IMMEDIATE_STRIKE_REASON,
+      checkInTime: '2026-07-01T05:31:00Z',
+      checkInTimePkt: 'PKT:2026-07-01T05:31:00Z',
+    },
+  ]);
+});
+
+test('buildStrikeItems: overlap keeps one item with immediate reason', () => {
+  const items = buildStrikeItems([
+    dayInfo('2026-07-01', true, false),
+    dayInfo('2026-07-02', true, false),
+    dayInfo('2026-07-03', true, true), // 3rd late AND immediate
+  ]);
+  assert.strictEqual(items.length, 1);
+  assert.strictEqual(items[0].date, '2026-07-03');
+  assert.strictEqual(items[0].reason, IMMEDIATE_STRIKE_REASON);
 });

@@ -3,7 +3,8 @@
 const Employee = require('../models/Employee');
 const LeaveBalance = require('../models/LeaveBalance');
 const AttendancePunch = require('../models/AttendancePunch');
-const { todayPktDateStr, pktHm } = require('../utils/dateUtils');
+const strikeService = require('./strikeService');
+const { todayPktDateStr, pktHm, formatHoursMinutes } = require('../utils/dateUtils');
 const { notFound } = require('../middleware/errorHandler');
 const { ROLES } = require('../middleware/auth');
 
@@ -14,6 +15,7 @@ function mapTodayPunch(punch) {
   // dashboard must show the not-checked-in state rather than a phantom one.
   if (!punch || !punch.fields.CheckInTime) return null;
   const f = punch.fields;
+  const workedMinutes = f.WorkedMinutes ?? null;
   return {
     checkInTime: pktHm(f.CheckInTime), // "HH:mm" PKT
     checkOutTime: pktHm(f.CheckOutTime), // "HH:mm" PKT or null
@@ -21,7 +23,13 @@ function mapTodayPunch(punch) {
     isLate: Boolean(f.IsLate),
     lateByMinutes: f.LateByMinutes ?? 0,
     workedHours: f.WorkedHours ?? null,
+    workedMinutes,
+    workedDuration: workedMinutes == null ? null : formatHoursMinutes(workedMinutes),
     overtimeHours: f.OvertimeHours ?? null,
+    overtimeDuration:
+      f.OvertimeHours == null
+        ? null
+        : formatHoursMinutes(Math.round(Number(f.OvertimeHours) * 60)),
     distanceMeters: f.DistanceMeters ?? null,
     checkInAccuracy: f.CheckInAccuracy ?? null,
   };
@@ -39,25 +47,44 @@ function reporteeStatus(punch) {
   return 'In office';
 }
 
+function mapMonthlyLateInfo(storedStrike, yearMonth) {
+  const items = Array.isArray(storedStrike && storedStrike.fields.StrikeItems)
+    ? storedStrike.fields.StrikeItems
+    : [];
+  return {
+    yearMonth,
+    lateCount: storedStrike ? storedStrike.fields.LateCount ?? 0 : 0,
+    strikeCount: storedStrike ? storedStrike.fields.StrikeCount ?? 0 : 0,
+    items: items.map((item) => ({
+      date: item && item.date ? String(item.date).slice(0, 10) : null,
+      reason: item && item.reason ? String(item.reason) : null,
+      checkInTime: item && item.checkInTime ? item.checkInTime : null,
+      checkInTimePkt: item && item.checkInTimePkt ? item.checkInTimePkt : null,
+    })),
+  };
+}
+
 /**
  * Assemble the dashboard payload for the current user: identity, manager,
- * leave balances, today's punch, and (for people-managers) direct reports with
- * their current status.
+ * leave balances, today's punch, current-month late/strike counts, and
+ * (for people-managers) direct reports with their current status.
  */
 async function getDashboard(userId) {
   const employee = await Employee.get(userId);
   if (!employee) throw notFound('User not found');
 
   const today = todayPktDateStr();
+  const yearMonth = today.slice(0, 7);
   const role = employee.fields.Role;
   const managerId = (employee.fields.Manager || [])[0] || null;
   const isManagerRole = role === ROLES.MANAGER || role === ROLES.HR_ADMIN;
 
-  const [manager, balance, todayPunch, reports] = await Promise.all([
+  const [manager, balance, todayPunch, reports, monthlyStrike] = await Promise.all([
     managerId ? Employee.get(managerId) : Promise.resolve(null),
     LeaveBalance.findForEmployee(userId),
     AttendancePunch.findForEmployeeOnDate(userId, today),
     isManagerRole ? Employee.findDirectReports(userId) : Promise.resolve([]),
+    strikeService.recomputeForEmployeeMonth(userId, yearMonth),
   ]);
 
   // Batch-load reportee punches so status is one query, not one-per-report.
@@ -84,6 +111,7 @@ async function getDashboard(userId) {
       casual: Number((balance && balance.fields.Casual) || 0),
     },
     todayPunch: mapTodayPunch(todayPunch),
+    lateInfo: mapMonthlyLateInfo(monthlyStrike, yearMonth),
     reportees: reports.map((r) => ({
       id: r.id,
       name: r.fields.Name,

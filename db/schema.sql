@@ -95,10 +95,12 @@ create table if not exists leave_requests (
   manager_id     uuid references employees (id) on delete set null,
   applied_at     timestamptz not null default now(),
   decided_at     timestamptz,
+  decided_by     uuid references employees (id) on delete set null,
   decision_token text
 );
 create index if not exists leave_employee_idx on leave_requests (employee_id);
 create index if not exists leave_token_idx on leave_requests (decision_token);
+create index if not exists leave_decided_by_idx on leave_requests (decided_by);
 
 -- ---------------------------------------------------------------------------
 -- Leave balances  (one row per employee)
@@ -175,6 +177,28 @@ create index if not exists regreq_employee_idx on regularization_requests (emplo
 create index if not exists regreq_manager_idx on regularization_requests (manager_id);
 create index if not exists regreq_status_idx on regularization_requests (status);
 
+-- ---------------------------------------------------------------------------
+-- Employee monthly late strikes
+-- One row per employee per calendar month. late_count is the number of late
+-- punch days; every 3rd late (3, 6, 9...) is recorded in strike_items
+-- with the strike date and reason. Recomputed from attendance_punches.is_late.
+-- ---------------------------------------------------------------------------
+create table if not exists employee_monthly_strikes (
+  id                    uuid primary key default gen_random_uuid(),
+  employee_id           uuid not null references employees (id) on delete cascade,
+  year_month            text not null
+                          check (year_month ~ '^\d{4}-\d{2}$'),
+  late_count            integer not null default 0
+                          check (late_count >= 0),
+  strike_count          integer not null default 0
+                          check (strike_count >= 0),
+  strike_items          jsonb not null default '[]'::jsonb,
+  updated_at            timestamptz not null default now(),
+  unique (employee_id, year_month)
+);
+create index if not exists monthly_strikes_employee_idx on employee_monthly_strikes (employee_id);
+create index if not exists monthly_strikes_month_idx on employee_monthly_strikes (year_month);
+
 -- Keep leave_balances.last_updated fresh on every update.
 create or replace function touch_last_updated() returns trigger as $$
 begin
@@ -187,3 +211,15 @@ drop trigger if exists trg_leave_balances_touch on leave_balances;
 create trigger trg_leave_balances_touch
   before update on leave_balances
   for each row execute function touch_last_updated();
+
+create or replace function touch_updated_at() returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_monthly_strikes_touch on employee_monthly_strikes;
+create trigger trg_monthly_strikes_touch
+  before update on employee_monthly_strikes
+  for each row execute function touch_updated_at();

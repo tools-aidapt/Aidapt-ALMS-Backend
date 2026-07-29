@@ -106,10 +106,17 @@ function minutesBetween(startInstant, endInstant) {
   return Math.round((end - start) / MS_PER_MINUTE);
 }
 
-/** Human "Hh Mm" from a total-minutes count (e.g. 510 -> "8h 30m"). */
+/**
+ * Human duration from total minutes, e.g. 570 -> "9 hours 30 mins".
+ * Prefer this for UI display over decimal hours (9.5).
+ */
 function formatHoursMinutes(totalMinutes) {
   const m = Math.max(0, Math.round(totalMinutes || 0));
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
+  const hours = Math.floor(m / 60);
+  const mins = m % 60;
+  const hourLabel = hours === 1 ? 'hour' : 'hours';
+  const minLabel = mins === 1 ? 'min' : 'mins';
+  return `${hours} ${hourLabel} ${mins} ${minLabel}`;
 }
 
 /** PKT wall-clock label "YYYY-MM-DD HH:MM" for an instant (or null). */

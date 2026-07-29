@@ -15,6 +15,7 @@ const LeaveRequest = makeModel({
     Manager: { col: 'manager_id', link: true },
     AppliedAt: { col: 'applied_at' },
     DecidedAt: { col: 'decided_at' },
+    DecidedBy: { col: 'decided_by', link: true },
     DecisionToken: { col: 'decision_token' },
   },
 });

@@ -6,6 +6,7 @@ const AttendancePunch = require('../models/AttendancePunch');
 const Employee = require('../models/Employee');
 const Shift = require('../models/Shift');
 const attendanceService = require('./attendanceService');
+const strikeService = require('./strikeService');
 const emailService = require('./emailService');
 const { nowUtcIso } = require('../utils/dateUtils');
 const { shiftLengthHours, computeWorked, computeLateness } = require('../utils/attendanceCalc');
@@ -164,7 +165,9 @@ async function applyApproval(request, approverId) {
   const shiftId = employee && (employee.fields.AssignedShift || [])[0];
   const shift = shiftId ? await Shift.get(shiftId) : null;
 
-  const lateness = finalCheckIn ? computeLateness(shift, finalCheckIn) : { isLate: false, lateByMinutes: 0 };
+  const lateness = finalCheckIn
+    ? computeLateness(shift, finalCheckIn)
+    : { isLate: false, lateByMinutes: 0, isImmediateStrike: false };
   const worked = computeWorked(finalCheckIn, finalCheckOut, shiftLengthHours(shift));
 
   const fieldUpdates = {
@@ -201,6 +204,8 @@ async function applyApproval(request, approverId) {
     DecidedAt: nowUtcIso(),
     Punch: [punch.id],
   });
+
+  await strikeService.recomputeForEmployeeMonth(employeeId, date);
 
   const updated = await RegularizationRequest.get(request.id);
   return {

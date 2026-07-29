@@ -24,7 +24,9 @@ const {
   shiftLengthHours,
   computeWorked,
   lateStrikeHalfDayDates,
+  halfDayDatesFromStrikeItems,
 } = require('../utils/attendanceCalc');
+const strikeService = require('./strikeService');
 const { conflict, notFound } = require('../middleware/errorHandler');
 
 /** Shape a punch record for API responses. */
@@ -50,9 +52,13 @@ function serialize(rec) {
     lateByMinutes: f.LateByMinutes ?? null,
     workedHours: f.WorkedHours ?? null,
     workedMinutes,
-    // "8h 30m" breakdown of the worked duration.
+    // Prefer this for UI: "9 hours 30 mins" (not decimal 9.5).
     workedDuration: workedMinutes === null ? null : formatHoursMinutes(workedMinutes),
     overtimeHours: f.OvertimeHours ?? null,
+    overtimeDuration:
+      f.OvertimeHours == null
+        ? null
+        : formatHoursMinutes(Math.round(Number(f.OvertimeHours) * 60)),
     status: f.Status || null,
   };
 }
@@ -116,6 +122,10 @@ async function checkIn(employeeId, { lat, lng, accuracy }) {
   const rec = existing
     ? await AttendancePunch.update(existing.id, fields)
     : await AttendancePunch.create(fields);
+
+  // Persist monthly strike snapshot (3rd late + immediate after start+30).
+  await strikeService.recomputeForEmployeeMonth(employeeId, dateStr);
+
   return serialize(rec);
 }
 
@@ -212,7 +222,7 @@ function cellStatus(dateStr, punch, ctx) {
     ) {
       return 'Half Day';
     }
-    // Late-strike penalty: every 3rd late day in the month is a Half Day.
+    // Late-strike penalty: Half Day only after every 3rd strike (not each strike day).
     if (ctx.strikeHalfDaySet && ctx.strikeHalfDaySet.has(dateStr)) {
       return 'Half Day';
     }
@@ -268,6 +278,10 @@ function dayEntry(dateStr, punch, ctx) {
     workedHours: f ? f.WorkedHours ?? null : null,
     workedDuration: f && f.WorkedMinutes != null ? formatHoursMinutes(f.WorkedMinutes) : null,
     overtimeHours: f ? f.OvertimeHours ?? null : null,
+    overtimeDuration:
+      f && f.OvertimeHours != null
+        ? formatHoursMinutes(Math.round(Number(f.OvertimeHours) * 60))
+        : null,
   };
 }
 
@@ -312,13 +326,33 @@ async function overview({ employeeId, from, to } = {}) {
     }
   }
 
-  // Late-strike Half Days: derived from current punch lateness, reset per month.
-  const strikeHalfDaySet = lateStrikeHalfDayDates(
-    rows.map((r) => ({
-      date: String(r.fields.Date).slice(0, 10),
+  // Strikes: recompute + persist for the overview's primary month.
+  // Half Day status uses every 3rd strike only — not every strike day.
+  const primaryMonth = fromDate.slice(0, 7);
+  const storedStrike = await strikeService.recomputeForEmployeeMonth(employeeId, primaryMonth);
+  const storedStrikeItems = Array.isArray(storedStrike.fields.StrikeItems)
+    ? storedStrike.fields.StrikeItems
+    : [];
+  const strikeHalfDaySet = halfDayDatesFromStrikeItems(storedStrikeItems);
+  const dayInfos = rows.map((r) => {
+    const date = String(r.fields.Date).slice(0, 10);
+    if (r.fields.CheckInTime && shift) {
+      const lateness = computeLateness(shift, r.fields.CheckInTime);
+      return {
+        date,
+        isLate: lateness.isLate,
+        isImmediateStrike: lateness.isImmediateStrike,
+      };
+    }
+    return {
+      date,
       isLate: Boolean(r.fields.IsLate),
-    }))
-  );
+      isImmediateStrike: false,
+    };
+  });
+  for (const d of lateStrikeHalfDayDates(dayInfos)) {
+    if (d.slice(0, 7) !== primaryMonth) strikeHalfDaySet.add(d);
+  }
 
   const ctx = {
     today,
@@ -337,6 +371,8 @@ async function overview({ employeeId, from, to } = {}) {
     present: 0, absent: 0, onLeave: 0, holiday: 0,
     late: 0, office: 0, remoteIn: 0, recordedDays: rows.length,
     lateStrikeHalfDays: strikeHalfDaySet.size,
+    lateCount: storedStrike.fields.LateCount ?? 0,
+    strikeCount: storedStrike.fields.StrikeCount ?? 0,
   };
   let totalWorkedMinutes = 0;
   let totalOvertimeHours = 0;
@@ -362,8 +398,20 @@ async function overview({ employeeId, from, to } = {}) {
 
   return {
     employeeId,
+    employeeName: employee ? employee.fields.Name || null : null,
     period: { from: fromDate, to: toDate },
     counts,
+    strikes: {
+      yearMonth: primaryMonth,
+      lateCount: storedStrike.fields.LateCount ?? 0,
+      strikeCount: storedStrike.fields.StrikeCount ?? 0,
+      items: storedStrikeItems.map((item) => ({
+        date: item && item.date ? String(item.date).slice(0, 10) : null,
+        reason: item && item.reason ? String(item.reason) : null,
+        checkInTime: item && item.checkInTime ? item.checkInTime : null,
+        checkInTimePkt: item && item.checkInTimePkt ? item.checkInTimePkt : null,
+      })),
+    },
     hours: {
       totalWorkedMinutes,
       totalWorkedHours: round2(totalWorkedMinutes / 60),

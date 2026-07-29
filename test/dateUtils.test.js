@@ -69,10 +69,12 @@ test('minutesBetween: exact minutes', () => {
   );
 });
 
-test('formatHoursMinutes: splits total minutes into Hh Mm', () => {
-  assert.strictEqual(formatHoursMinutes(517), '8h 37m');
-  assert.strictEqual(formatHoursMinutes(60), '1h 0m');
-  assert.strictEqual(formatHoursMinutes(0), '0h 0m');
+test('formatHoursMinutes: splits total minutes into hours and mins', () => {
+  assert.strictEqual(formatHoursMinutes(517), '8 hours 37 mins');
+  assert.strictEqual(formatHoursMinutes(570), '9 hours 30 mins');
+  assert.strictEqual(formatHoursMinutes(60), '1 hour 0 mins');
+  assert.strictEqual(formatHoursMinutes(1), '0 hours 1 min');
+  assert.strictEqual(formatHoursMinutes(0), '0 hours 0 mins');
 });
 
 test('pktTimeLabel: UTC instant -> PKT YYYY-MM-DD HH:MM', () => {

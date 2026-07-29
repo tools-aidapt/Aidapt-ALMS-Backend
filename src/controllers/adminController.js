@@ -7,7 +7,8 @@ const RegularizationLog = require('../models/RegularizationLog');
 const Employee = require('../models/Employee');
 const Shift = require('../models/Shift');
 const attendanceService = require('../services/attendanceService');
-const { shiftLengthHours, computeWorked } = require('../utils/attendanceCalc');
+const strikeService = require('../services/strikeService');
+const { shiftLengthHours, computeWorked, computeLateness } = require('../utils/attendanceCalc');
 const { badRequest, notFound } = require('../middleware/errorHandler');
 
 /**
@@ -82,15 +83,45 @@ const regularizePunch = asyncHandler(async (req, res) => {
   }
 
   // Always re-derive worked/overtime from the final timestamps (guarded — nulls
-  // if either is missing) using the employee's shift length.
+  // if either is missing) using the employee's shift length. When check-in time
+  // changes, also re-derive lateness from the shift unless explicitly patched.
   const employeeId = (punch.fields.Employee || [])[0];
+  let shift = null;
   let shiftLen = null;
   if (employeeId) {
     const employee = await Employee.get(employeeId);
     const shiftId = employee && (employee.fields.AssignedShift || [])[0];
-    const shift = shiftId ? await Shift.get(shiftId) : null;
+    shift = shiftId ? await Shift.get(shiftId) : null;
     shiftLen = shiftLengthHours(shift);
   }
+
+  if (finalCheckIn && shift && 'checkInTime' in req.body) {
+    const lateness = computeLateness(shift, finalCheckIn);
+    if (req.body.isLate === undefined) {
+      if (normaliseForCompare(punch.fields.IsLate) !== normaliseForCompare(lateness.isLate)) {
+        fieldUpdates.IsLate = lateness.isLate;
+        changes.push({
+          field: 'IsLate',
+          oldValue: normaliseForCompare(punch.fields.IsLate),
+          newValue: normaliseForCompare(lateness.isLate),
+        });
+      }
+    }
+    if (req.body.lateByMinutes === undefined) {
+      if (
+        normaliseForCompare(punch.fields.LateByMinutes) !==
+        normaliseForCompare(lateness.lateByMinutes)
+      ) {
+        fieldUpdates.LateByMinutes = lateness.lateByMinutes;
+        changes.push({
+          field: 'LateByMinutes',
+          oldValue: normaliseForCompare(punch.fields.LateByMinutes),
+          newValue: normaliseForCompare(lateness.lateByMinutes),
+        });
+      }
+    }
+  }
+
   const worked = computeWorked(finalCheckIn, finalCheckOut, shiftLen);
   for (const [field, value] of [
     ['WorkedMinutes', worked.workedMinutes],
@@ -121,6 +152,10 @@ const regularizePunch = asyncHandler(async (req, res) => {
       OldValue: change.oldValue,
       NewValue: change.newValue,
     });
+  }
+
+  if (employeeId && punch.fields.Date) {
+    await strikeService.recomputeForEmployeeMonth(employeeId, punch.fields.Date);
   }
 
   res.json({

@@ -33,6 +33,7 @@ function serialize(rec) {
     manager: f.Manager || [],
     appliedAt: f.AppliedAt || null,
     decidedAt: f.DecidedAt || null,
+    decidedBy: f.DecidedBy || [],
     // DecisionToken deliberately omitted from API output.
   };
 }
@@ -50,24 +51,27 @@ async function peopleMap(ids) {
 }
 
 /**
- * Attach the employee's and manager's name + photoUrl to serialized leave
- * records. Batches the lookups so a list of N requests costs one query, not N.
+ * Attach the employee's, manager's, and decider's name + photoUrl to serialized
+ * leave records. Batches the lookups so a list of N requests costs one query.
  */
 async function attachPeople(items) {
   const ids = [];
   for (const it of items) {
-    ids.push((it.employee || [])[0], (it.manager || [])[0]);
+    ids.push((it.employee || [])[0], (it.manager || [])[0], (it.decidedBy || [])[0]);
   }
   const people = await peopleMap(ids);
   return items.map((it) => {
     const emp = people.get((it.employee || [])[0]);
     const mgr = people.get((it.manager || [])[0]);
+    const decider = people.get((it.decidedBy || [])[0]);
     return {
       ...it,
       employeeName: emp ? emp.name : null,
       employeePhotoUrl: emp ? emp.photoUrl : null,
       managerName: mgr ? mgr.name : null,
       managerPhotoUrl: mgr ? mgr.photoUrl : null,
+      decidedByName: decider ? decider.name : null,
+      decidedByPhotoUrl: decider ? decider.photoUrl : null,
     };
   });
 }
@@ -185,8 +189,9 @@ const BALANCE_COLUMN = { Annual: 'annual', Sick: 'sick', Casual: 'casual' };
  * transaction with a row lock (SELECT ... FOR UPDATE), so a crash or a
  * concurrent approval can't double-deduct or half-apply.
  * @param {'Approved'|'Rejected'} decision
+ * @param {string|null} decidedById employee who approved/rejected (null if unknown)
  */
-async function applyDecision(request, decision) {
+async function applyDecision(request, decision, decidedById = null) {
   if (request.fields.Status !== 'Pending') {
     throw conflict(`Request already ${request.fields.Status}`, 'ALREADY_DECIDED');
   }
@@ -215,14 +220,17 @@ async function applyDecision(request, decision) {
         [days, employeeId]
       );
       await client.query(
-        `UPDATE leave_requests SET status = $1, decided_at = now(), decision_token = NULL WHERE id = $2`,
-        ['Approved', request.id]
+        `UPDATE leave_requests
+         SET status = $1, decided_at = now(), decided_by = $2, decision_token = NULL
+         WHERE id = $3`,
+        ['Approved', decidedById, request.id]
       );
     });
   } else {
     await LeaveRequest.update(request.id, {
       Status: decision,
       DecidedAt: nowUtcIso(),
+      DecidedBy: decidedById ? [decidedById] : [],
       DecisionToken: '', // invalidate single-use token on rejection
     });
   }
@@ -264,11 +272,12 @@ async function decideInApp(requestId, action, caller) {
   }
 
   const decision = action === 'approve' ? 'Approved' : 'Rejected';
-  return applyDecision(request, decision);
+  return applyDecision(request, decision, caller.id);
 }
 
 /**
  * Email-link decision, gated purely by the single-use token.
+ * Records the assigned manager as decided_by when available (email goes to them).
  */
 async function decideByToken(requestId, token, action) {
   if (!token) throw badRequest('Missing token', 'MISSING_TOKEN');
@@ -284,7 +293,8 @@ async function decideByToken(requestId, token, action) {
   }
 
   const decision = action === 'approve' ? 'Approved' : 'Rejected';
-  return applyDecision(request, decision);
+  const decidedById = (request.fields.Manager || [])[0] || null;
+  return applyDecision(request, decision, decidedById);
 }
 
 /**
@@ -331,6 +341,7 @@ async function updateRequest(requestId, employeeId, patch) {
     Reason: reason,
     Status: 'Pending',
     DecidedAt: null,
+    DecidedBy: [],
     DecisionToken: token,
   });
 
