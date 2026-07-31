@@ -28,6 +28,7 @@ create table if not exists employees (
                        check (role in ('Employee','Manager','HR Admin')),
   manager_id         uuid references employees (id) on delete set null,
   assigned_shift_id  uuid references shifts (id) on delete set null,
+  team_id            uuid, -- FK added after teams table exists
   date_of_joining    date,
   monthly_salary     numeric,
   status             text not null default 'Active'
@@ -40,9 +41,34 @@ create table if not exists employees (
   photo_url          text,
   employment_status  text not null default 'Full-time'
                        check (employment_status in ('Probation','Full-time')),
+  grace_minutes      integer
+                       check (grace_minutes is null or grace_minutes >= 0),
   created_at         timestamptz not null default now()
 );
 create index if not exists employees_manager_idx on employees (manager_id);
+
+-- ---------------------------------------------------------------------------
+-- Teams (lead is an employee; members point back via employees.team_id)
+-- ---------------------------------------------------------------------------
+create table if not exists teams (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null unique,
+  lead_id    uuid references employees (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists teams_lead_idx on teams (lead_id);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'employees_team_id_fkey'
+  ) then
+    alter table employees
+      add constraint employees_team_id_fkey
+      foreign key (team_id) references teams (id) on delete set null;
+  end if;
+end $$;
+create index if not exists employees_team_idx on employees (team_id);
 
 -- ---------------------------------------------------------------------------
 -- Office config (single row expected)
@@ -223,3 +249,31 @@ drop trigger if exists trg_monthly_strikes_touch on employee_monthly_strikes;
 create trigger trg_monthly_strikes_touch
   before update on employee_monthly_strikes
   for each row execute function touch_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Attendance notification log (reminder / report send dedup)
+-- ---------------------------------------------------------------------------
+create table if not exists attendance_notification_log (
+  id            uuid primary key default gen_random_uuid(),
+  kind          text not null
+                  check (kind in (
+                    'checkin_reminder',
+                    'checkout_reminder',
+                    'report_daily',
+                    'report_weekly',
+                    'report_monthly'
+                  )),
+  for_date      date not null,
+  employee_id   uuid references employees (id) on delete cascade,
+  recipient_id  uuid references employees (id) on delete cascade,
+  period_key    text,
+  created_at    timestamptz not null default now()
+);
+create unique index if not exists attn_log_reminder_uniq
+  on attendance_notification_log (employee_id, kind, for_date)
+  where kind in ('checkin_reminder', 'checkout_reminder');
+create unique index if not exists attn_log_report_uniq
+  on attendance_notification_log (recipient_id, kind, period_key)
+  where kind in ('report_daily', 'report_weekly', 'report_monthly');
+create index if not exists attn_log_kind_date_idx
+  on attendance_notification_log (kind, for_date);

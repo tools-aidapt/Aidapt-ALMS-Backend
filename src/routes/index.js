@@ -13,6 +13,7 @@ const regularizationRoutes = require('./regularizationRoutes');
 const adminRoutes = require('./adminRoutes');
 const dashboardRoutes = require('./dashboardRoutes');
 const jobsRoutes = require('./jobsRoutes');
+const teamRoutes = require('./teamRoutes');
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ router.get('/health', (req, res) => res.json({ data: { status: 'ok' } }));
 
 router.use('/auth', authRoutes);
 router.use('/employees', employeeRoutes);
+router.use('/teams', teamRoutes);
 router.use('/shifts', shiftRoutes);
 router.use('/office-config', officeConfigRoutes);
 router.use('/attendance', attendanceRoutes);

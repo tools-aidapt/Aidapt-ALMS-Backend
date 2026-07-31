@@ -20,10 +20,12 @@ const schemas = {
     role: z.enum(ROLE_VALUES).default('Employee'),
     managerId: z.string().optional(),
     shiftId: z.string().optional(),
+    teamId: z.string().uuid().optional(),
     dateOfJoining: z.string().optional(),
     monthlySalary: z.number().nonnegative().optional(),
     photoUrl: z.string().optional(),
     employmentStatus: z.enum(['Probation', 'Full-time']).optional(),
+    graceMinutes: z.number().int().nonnegative().nullable().optional(),
   }),
   update: z
     .object({
@@ -31,10 +33,12 @@ const schemas = {
       role: z.enum(ROLE_VALUES).optional(),
       managerId: z.string().nullable().optional(),
       shiftId: z.string().nullable().optional(),
+      teamId: z.string().uuid().nullable().optional(),
       status: z.enum(['Active', 'Inactive']).optional(),
       monthlySalary: z.number().nonnegative().optional(),
       photoUrl: z.string().nullable().optional(),
       employmentStatus: z.enum(['Probation', 'Full-time']).optional(),
+      graceMinutes: z.number().int().nonnegative().nullable().optional(),
       // Personal details — HR Admin may correct these on an employee's behalf.
       phoneNo: z.string().nullable().optional(),
       emergencyPhoneNo: z.string().nullable().optional(),
@@ -81,8 +85,11 @@ function serialize(rec, caller) {
     employmentStatus: f.EmploymentStatus || 'Full-time',
     manager: f.Manager || [],
     assignedShift: f.AssignedShift || [],
+    team: f.Team || [],
     dateOfJoining: f.DateOfJoining || null,
     status: f.Status || null,
+    // null = inherit assigned shift grace
+    graceMinutes: f.GraceMinutes == null ? null : Number(f.GraceMinutes),
     createdAt: f.CreatedAt || rec.createdTime,
   };
   if (canSeePrivate) {
@@ -145,9 +152,11 @@ const create = asyncHandler(async (req, res) => {
     };
     if (body.managerId) fields.Manager = [body.managerId];
     if (body.shiftId) fields.AssignedShift = [body.shiftId];
+    if (body.teamId) fields.Team = [body.teamId];
     if (body.dateOfJoining) fields.DateOfJoining = body.dateOfJoining;
     if (body.monthlySalary !== undefined) fields.MonthlySalary = body.monthlySalary;
     if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
+    if (body.graceMinutes !== undefined) fields.GraceMinutes = body.graceMinutes;
 
     const rec = await Employee.createWithId(userId, fields);
 
@@ -189,8 +198,12 @@ const update = asyncHandler(async (req, res) => {
   if (body.shiftId !== undefined) {
     fields.AssignedShift = body.shiftId ? [body.shiftId] : [];
   }
+  if (body.teamId !== undefined) {
+    fields.Team = body.teamId ? [body.teamId] : [];
+  }
   if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
   if (body.employmentStatus !== undefined) fields.EmploymentStatus = body.employmentStatus;
+  if (body.graceMinutes !== undefined) fields.GraceMinutes = body.graceMinutes;
   if (body.phoneNo !== undefined) fields.PhoneNo = body.phoneNo;
   if (body.emergencyPhoneNo !== undefined) fields.EmergencyPhoneNo = body.emergencyPhoneNo;
   if (body.address !== undefined) fields.Address = body.address;

@@ -224,6 +224,107 @@ function sendPasswordResetOtp({ email, name, otp, expiresMinutes = 10 }) {
   });
 }
 
+/**
+ * Attendance check-in / check-out reminder at shift start or end.
+ * @param {{to, employeeName, type: 'checkin'|'checkout', date, shiftTime, checkInTime?}} args
+ */
+function sendAttendanceReminder({ to, employeeName, type, date, shiftTime, checkInTime }) {
+  const isCheckIn = type === 'checkin';
+  const subject = isCheckIn
+    ? `Reminder: please check in (${date})`
+    : `Reminder: please check out (${date})`;
+  const html = isCheckIn
+    ? `
+      <p>Hi ${escapeHtml(employeeName || '')},</p>
+      <p>Your shift starts at <strong>${shiftTime}</strong> PKT today (${date}).</p>
+      <p>Please check in on ALMS if you have not already.</p>
+    `
+    : `
+      <p>Hi ${escapeHtml(employeeName || '')},</p>
+      <p>Your shift ends at <strong>${shiftTime}</strong> PKT today (${date}).</p>
+      <p>You are still checked in${checkInTime ? ` (since ${pktTimeLabel(checkInTime)})` : ''}.
+         Please check out on ALMS.</p>
+    `;
+
+  return dispatch('attendance.reminder', {
+    emailReason: 'attendance_reminder',
+    to,
+    employeeName: employeeName || null,
+    employeeEmail: to,
+    subject,
+    html,
+    text: stripHtml(html),
+    data: {
+      type,
+      date,
+      shiftTime,
+      checkInTime: checkInTime || null,
+      checkInTimePkt: checkInTime ? pktTimeLabel(checkInTime) : null,
+    },
+  });
+}
+
+/**
+ * Attendance report for Managers / HR Admin.
+ * @param {{to, recipientName, role, period, from, to: toDate, subject, rows}} args
+ */
+function sendAttendanceReport({ to, recipientName, role, period, from, to: toDate, subject, rows }) {
+  const tableRows = (rows || [])
+    .map(
+      (r) => `
+      <tr>
+        <td style="padding:4px 8px;border:1px solid #ddd">${escapeHtml(r.teamName || '—')}</td>
+        <td style="padding:4px 8px;border:1px solid #ddd">${escapeHtml(r.employeeName || '')}</td>
+        <td style="padding:4px 8px;border:1px solid #ddd">${r.date}</td>
+        <td style="padding:4px 8px;border:1px solid #ddd">${r.checkInTime || '—'}</td>
+        <td style="padding:4px 8px;border:1px solid #ddd">${r.checkOutTime || '—'}</td>
+        <td style="padding:4px 8px;border:1px solid #ddd">${escapeHtml(r.status || '')}${r.isLate ? ' (Late)' : ''}</td>
+        <td style="padding:4px 8px;border:1px solid #ddd">${r.workedDuration || '—'}</td>
+      </tr>`
+    )
+    .join('');
+
+  const html = `
+    <p>Hi ${escapeHtml(recipientName || '')},</p>
+    <p>Here is the <strong>${escapeHtml(period)}</strong> attendance report
+       for ${from === toDate ? from : `${from} → ${toDate}`}
+       (${escapeHtml(role || '')} view).</p>
+    <table style="border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr>
+          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Team</th>
+          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Employee</th>
+          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Date</th>
+          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Check-in</th>
+          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Check-out</th>
+          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Status</th>
+          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Worked</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRows || '<tr><td colspan="7" style="padding:8px">No rows</td></tr>'}
+      </tbody>
+    </table>
+  `;
+
+  return dispatch('attendance.report', {
+    emailReason: 'attendance_report',
+    to,
+    employeeName: recipientName || null,
+    employeeEmail: to,
+    subject,
+    html,
+    text: stripHtml(html),
+    data: {
+      period,
+      from,
+      to: toDate,
+      role,
+      rows,
+    },
+  });
+}
+
 function stripHtml(html = '') {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -242,5 +343,7 @@ module.exports = {
   sendLeaveDecisionNotice,
   sendRegularizationApprovalRequest,
   sendPasswordResetOtp,
+  sendAttendanceReminder,
+  sendAttendanceReport,
   n8nConfigured: configured,
 };

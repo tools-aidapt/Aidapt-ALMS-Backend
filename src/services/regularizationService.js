@@ -9,7 +9,7 @@ const attendanceService = require('./attendanceService');
 const strikeService = require('./strikeService');
 const emailService = require('./emailService');
 const { nowUtcIso } = require('../utils/dateUtils');
-const { shiftLengthHours, computeWorked, computeLateness } = require('../utils/attendanceCalc');
+const { shiftLengthHours, computeWorked, computeLateness, shiftWithResolvedGrace } = require('../utils/attendanceCalc');
 const { badRequest, conflict, notFound, forbidden } = require('../middleware/errorHandler');
 
 function serialize(rec) {
@@ -166,7 +166,7 @@ async function applyApproval(request, approverId) {
   const shift = shiftId ? await Shift.get(shiftId) : null;
 
   const lateness = finalCheckIn
-    ? computeLateness(shift, finalCheckIn)
+    ? computeLateness(shiftWithResolvedGrace(shift, employee), finalCheckIn)
     : { isLate: false, lateByMinutes: 0, isImmediateStrike: false };
   const worked = computeWorked(finalCheckIn, finalCheckOut, shiftLengthHours(shift));
 

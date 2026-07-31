@@ -6,6 +6,7 @@ const Shift = require('../models/Shift');
 const EmployeeMonthlyStrike = require('../models/EmployeeMonthlyStrike');
 const {
   computeLateness,
+  shiftWithResolvedGrace,
   buildStrikeItems,
 } = require('../utils/attendanceCalc');
 const { pktTimeLabel } = require('../utils/dateUtils');
@@ -53,7 +54,7 @@ async function recomputeForEmployeeMonth(employeeId, yearMonthOrDate) {
     // Prefer live evaluation from check-in + shift so immediate strikes stay
     // accurate even when IsLate was edited independently.
     if (checkIn && shift) {
-      const lateness = computeLateness(shift, checkIn);
+      const lateness = computeLateness(shiftWithResolvedGrace(shift, employee), checkIn);
       return {
         date,
         isLate: lateness.isLate,

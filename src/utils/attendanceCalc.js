@@ -23,6 +23,37 @@ function modeForDistance(distanceMeters, radiusMeters) {
 const IMMEDIATE_STRIKE_AFTER_START_MINUTES = 30;
 
 /**
+ * Effective grace minutes for lateness: employee override if set, else shift
+ * grace, else 0.
+ * @param {{fields: {GraceMinutes?: number|null}}|null|undefined} employee
+ * @param {{fields: {GraceMinutes?: number|null}}|null|undefined} shift
+ * @returns {number}
+ */
+function resolveGraceMinutes(employee, shift) {
+  const empGrace = employee && employee.fields ? employee.fields.GraceMinutes : null;
+  if (Number.isFinite(empGrace) && empGrace >= 0) return empGrace;
+  const shiftGrace = shift && shift.fields ? shift.fields.GraceMinutes : null;
+  if (Number.isFinite(shiftGrace) && shiftGrace >= 0) return shiftGrace;
+  return 0;
+}
+
+/**
+ * Shift-like object for computeLateness with resolved grace applied.
+ * @param {{fields: {StartTime?: string, GraceMinutes?: number}}|null} shift
+ * @param {{fields: {GraceMinutes?: number|null}}|null|undefined} employee
+ */
+function shiftWithResolvedGrace(shift, employee) {
+  if (!shift) return null;
+  return {
+    ...shift,
+    fields: {
+      ...shift.fields,
+      GraceMinutes: resolveGraceMinutes(employee, shift),
+    },
+  };
+}
+
+/**
  * Lateness against the shift start + grace, evaluated in PKT.
  * Also flags an immediate strike when arrival is more than
  * IMMEDIATE_STRIKE_AFTER_START_MINUTES after StartTime.
@@ -209,6 +240,8 @@ function computeWorked(checkInInstant, checkOutInstant, shiftLen) {
 module.exports = {
   modeForDistance,
   computeLateness,
+  resolveGraceMinutes,
+  shiftWithResolvedGrace,
   shiftLengthHours,
   computeWorked,
   lateStrikeHalfDayDates,

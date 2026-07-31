@@ -8,7 +8,7 @@ const Employee = require('../models/Employee');
 const Shift = require('../models/Shift');
 const attendanceService = require('../services/attendanceService');
 const strikeService = require('../services/strikeService');
-const { shiftLengthHours, computeWorked, computeLateness } = require('../utils/attendanceCalc');
+const { shiftLengthHours, computeWorked, computeLateness, shiftWithResolvedGrace } = require('../utils/attendanceCalc');
 const { badRequest, notFound } = require('../middleware/errorHandler');
 
 /**
@@ -86,17 +86,18 @@ const regularizePunch = asyncHandler(async (req, res) => {
   // if either is missing) using the employee's shift length. When check-in time
   // changes, also re-derive lateness from the shift unless explicitly patched.
   const employeeId = (punch.fields.Employee || [])[0];
+  let employee = null;
   let shift = null;
   let shiftLen = null;
   if (employeeId) {
-    const employee = await Employee.get(employeeId);
+    employee = await Employee.get(employeeId);
     const shiftId = employee && (employee.fields.AssignedShift || [])[0];
     shift = shiftId ? await Shift.get(shiftId) : null;
     shiftLen = shiftLengthHours(shift);
   }
 
   if (finalCheckIn && shift && 'checkInTime' in req.body) {
-    const lateness = computeLateness(shift, finalCheckIn);
+    const lateness = computeLateness(shiftWithResolvedGrace(shift, employee), finalCheckIn);
     if (req.body.isLate === undefined) {
       if (normaliseForCompare(punch.fields.IsLate) !== normaliseForCompare(lateness.isLate)) {
         fieldUpdates.IsLate = lateness.isLate;

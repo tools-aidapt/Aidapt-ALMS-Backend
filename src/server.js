@@ -3,6 +3,8 @@
 const app = require('./app');
 const env = require('./config/env');
 const absentMarker = require('./jobs/absentMarker');
+const attendanceReminders = require('./jobs/attendanceReminders');
+const attendanceReports = require('./jobs/attendanceReports');
 
 const server = app.listen(env.port, () => {
   // eslint-disable-next-line no-console
@@ -24,11 +26,15 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-// Optional: schedule the daily absent-marking job unless disabled.
+// Optional: schedule background jobs unless disabled.
 if (process.env.ENABLE_CRON !== 'false') {
   absentMarker.schedule();
+  attendanceReminders.schedule();
+  attendanceReports.schedule();
   // eslint-disable-next-line no-console
-  console.log('Absent-marking cron scheduled (23:30 Asia/Karachi)');
+  console.log(
+    'Cron scheduled: absent 23:30, reminders every minute, reports daily 23:45 / weekly Mon 08:00 / monthly 1st 08:15 (Asia/Karachi)'
+  );
 }
 
 // Graceful shutdown.

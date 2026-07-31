@@ -4,6 +4,8 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const {
   computeLateness,
+  resolveGraceMinutes,
+  shiftWithResolvedGrace,
   shiftLengthHours,
   modeForDistance,
   computeWorked,
@@ -13,6 +15,7 @@ const {
 } = require('../src/utils/attendanceCalc');
 
 const shift = (fields) => ({ id: 'shf1', fields });
+const employee = (fields) => ({ id: 'emp1', fields });
 
 test('computeLateness: on-time within grace is not late', () => {
   const s = shift({ StartTime: '10:00', GraceMinutes: 15 });
@@ -45,6 +48,53 @@ test('computeLateness: no shift -> not late', () => {
   const r = computeLateness(null, '2026-07-08T09:00:00Z');
   assert.strictEqual(r.isLate, false);
   assert.strictEqual(r.isImmediateStrike, false);
+});
+
+test('resolveGraceMinutes: employee override wins over shift', () => {
+  assert.strictEqual(
+    resolveGraceMinutes(employee({ GraceMinutes: 5 }), shift({ GraceMinutes: 20 })),
+    5
+  );
+});
+
+test('resolveGraceMinutes: null employee grace falls back to shift', () => {
+  assert.strictEqual(
+    resolveGraceMinutes(employee({ GraceMinutes: null }), shift({ GraceMinutes: 20 })),
+    20
+  );
+});
+
+test('resolveGraceMinutes: missing employee and shift grace -> 0', () => {
+  assert.strictEqual(resolveGraceMinutes(null, null), 0);
+  assert.strictEqual(resolveGraceMinutes(employee({}), shift({})), 0);
+});
+
+test('resolveGraceMinutes: employee grace 0 is a valid override', () => {
+  assert.strictEqual(
+    resolveGraceMinutes(employee({ GraceMinutes: 0 }), shift({ GraceMinutes: 20 })),
+    0
+  );
+});
+
+test('shiftWithResolvedGrace: lateness uses employee override', () => {
+  const s = shift({ StartTime: '10:00', GraceMinutes: 20 });
+  const emp = employee({ GraceMinutes: 5 });
+  // 10:10 PKT — late with 5m grace, on-time with 20m shift grace
+  const withOverride = computeLateness(shiftWithResolvedGrace(s, emp), '2026-07-08T05:10:00Z');
+  assert.strictEqual(withOverride.isLate, true);
+  assert.strictEqual(withOverride.lateByMinutes, 5);
+
+  const withShift = computeLateness(shiftWithResolvedGrace(s, employee({ GraceMinutes: null })), '2026-07-08T05:10:00Z');
+  assert.strictEqual(withShift.isLate, false);
+});
+
+test('shiftWithResolvedGrace: immediate strike still at start+30 regardless of grace', () => {
+  const s = shift({ StartTime: '10:00', GraceMinutes: 0 });
+  const emp = employee({ GraceMinutes: 45 }); // wider than +30
+  // 10:31 PKT — still immediate strike
+  const r = computeLateness(shiftWithResolvedGrace(s, emp), '2026-07-08T05:31:00Z');
+  assert.strictEqual(r.isImmediateStrike, true);
+  assert.strictEqual(r.isLate, false); // within 45m grace, but still strike
 });
 
 test('shiftLengthHours: standard 9-18 shift', () => {

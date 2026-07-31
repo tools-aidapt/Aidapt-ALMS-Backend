@@ -12,6 +12,7 @@ const Employee = makeModel({
     Role: { col: 'role' },
     Manager: { col: 'manager_id', link: true },
     AssignedShift: { col: 'assigned_shift_id', link: true },
+    Team: { col: 'team_id', link: true },
     DateOfJoining: { col: 'date_of_joining' },
     MonthlySalary: { col: 'monthly_salary' },
     Status: { col: 'status' },
@@ -22,6 +23,7 @@ const Employee = makeModel({
     EmergencyPhoneNo: { col: 'emergency_phone_no' },
     PhotoUrl: { col: 'photo_url' },
     EmploymentStatus: { col: 'employment_status' },
+    GraceMinutes: { col: 'grace_minutes' },
   },
 });
 
@@ -51,6 +53,16 @@ Employee.findByEmail = async function findByEmail(email) {
 /** Active direct reports of a manager, by manager id. */
 Employee.findDirectReports = function findDirectReports(managerId) {
   return this.selectWhere("manager_id = $1 AND status = 'Active'", [managerId], 'ORDER BY name ASC');
+};
+
+/** Active employees belonging to any of the given team ids. */
+Employee.findByTeamIds = function findByTeamIds(teamIds) {
+  if (!teamIds || !teamIds.length) return Promise.resolve([]);
+  return this.selectWhere(
+    "team_id = ANY($1::uuid[]) AND status = 'Active'",
+    [teamIds],
+    'ORDER BY name ASC'
+  );
 };
 
 module.exports = Employee;

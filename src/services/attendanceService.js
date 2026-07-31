@@ -21,6 +21,7 @@ const {
 const {
   modeForDistance,
   computeLateness,
+  shiftWithResolvedGrace,
   shiftLengthHours,
   computeWorked,
   lateStrikeHalfDayDates,
@@ -100,10 +101,10 @@ async function checkIn(employeeId, { lat, lng, accuracy }) {
     throw conflict('Already checked in today', 'ALREADY_CHECKED_IN');
   }
 
-  const { shift } = await loadEmployeeShift(employeeId);
+  const { employee, shift } = await loadEmployeeShift(employeeId);
   const now = nowUtcIso();
   const geo = await evaluateGeofence(lat, lng);
-  const lateness = computeLateness(shift, now);
+  const lateness = computeLateness(shiftWithResolvedGrace(shift, employee), now);
 
   const fields = {
     Employee: [employeeId],
@@ -337,7 +338,7 @@ async function overview({ employeeId, from, to } = {}) {
   const dayInfos = rows.map((r) => {
     const date = String(r.fields.Date).slice(0, 10);
     if (r.fields.CheckInTime && shift) {
-      const lateness = computeLateness(shift, r.fields.CheckInTime);
+      const lateness = computeLateness(shiftWithResolvedGrace(shift, employee), r.fields.CheckInTime);
       return {
         date,
         isLate: lateness.isLate,
