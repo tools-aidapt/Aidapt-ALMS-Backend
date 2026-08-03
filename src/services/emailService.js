@@ -358,11 +358,13 @@ function sendAttendanceReport({
   const periodTitle =
     period === 'daily' ? 'Daily' : period === 'weekly' ? 'Weekly' : 'Monthly';
 
+  const isMonthly = period === 'monthly';
+
   const insightsSection =
-    period === 'monthly' && insights && insights.length
+    isMonthly && insights && insights.length
       ? `
-    <div style="margin:0 0 28px">
-      <h2 style="margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600">Monthly insights</h2>
+    <div>
+      <h2 style="margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600">Monthly summary</h2>
       <p style="margin:0 0 14px;color:${brand.muted};font-size:13px">
         Worked vs expected (shift days − holidays − leave). Onsite = Office · Remote = Remote In.
       </p>
@@ -384,8 +386,16 @@ function sendAttendanceReport({
         </thead>
         <tbody>${insightRows}</tbody>
       </table>
+      <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
+        ${(insights || []).length} employee${(insights || []).length === 1 ? '' : 's'}
+      </p>
     </div>`
-      : '';
+      : isMonthly
+        ? `
+    <p style="margin:0;padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px;border:1px solid ${brand.line};border-radius:8px">
+      No monthly summary for this view. If you lead a team, ensure members are assigned to your team in AIMS.
+    </p>`
+        : '';
 
   const emptyDaily = `
     <tr>
@@ -393,6 +403,34 @@ function sendAttendanceReport({
         No attendance rows in this view. If you lead a team, ensure members are assigned to your team in AIMS.
       </td>
     </tr>`;
+
+  // Monthly emails are summary-only (insights). Daily/weekly keep per-day detail.
+  const dailySection = isMonthly
+    ? ''
+    : `
+              <div>
+                <h2 style="margin:0 0 14px;font-size:16px;color:${brand.ink};font-weight:600">Daily detail</h2>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
+                  <thead>
+                    <tr>
+                      <th style="${th}">Team</th>
+                      <th style="${th}">Employee</th>
+                      <th style="${th}">Date</th>
+                      <th style="${th}">Check-in</th>
+                      <th style="${th}">Check-out</th>
+                      <th style="${th}">Status</th>
+                      <th style="${th}">Mode</th>
+                      <th style="${th}">Worked</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${tableRows || emptyDaily}
+                  </tbody>
+                </table>
+                <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
+                  ${(rows || []).length} row${(rows || []).length === 1 ? '' : 's'}
+                </p>
+              </div>`;
 
   const html = `
 <!DOCTYPE html>
@@ -430,34 +468,12 @@ function sendAttendanceReport({
                 Hi ${escapeHtml(recipientName || '')},
               </p>
               <p style="margin:0 0 22px;font-size:14px;color:${brand.muted};line-height:1.55">
-                Here is your <strong style="color:${brand.ink}">${escapeHtml(period)}</strong> attendance report for
+                Here is your <strong style="color:${brand.ink}">${escapeHtml(period)}</strong> attendance ${isMonthly ? 'summary' : 'report'} for
                 <strong style="color:${brand.ink}">${escapeHtml(rangeLabel)}</strong>
                 <span style="color:${brand.teal}"> · ${escapeHtml(role || 'team')} view</span>.
               </p>
               ${insightsSection}
-              <div>
-                <h2 style="margin:0 0 14px;font-size:16px;color:${brand.ink};font-weight:600">Daily detail</h2>
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
-                  <thead>
-                    <tr>
-                      <th style="${th}">Team</th>
-                      <th style="${th}">Employee</th>
-                      <th style="${th}">Date</th>
-                      <th style="${th}">Check-in</th>
-                      <th style="${th}">Check-out</th>
-                      <th style="${th}">Status</th>
-                      <th style="${th}">Mode</th>
-                      <th style="${th}">Worked</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${tableRows || emptyDaily}
-                  </tbody>
-                </table>
-                <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
-                  ${(rows || []).length} row${(rows || []).length === 1 ? '' : 's'}
-                </p>
-              </div>
+              ${dailySection}
             </td>
           </tr>
           <tr>
@@ -488,7 +504,8 @@ function sendAttendanceReport({
       from,
       to: toDate,
       role,
-      rows,
+      // Monthly: omit day-by-day rows from the email payload (summary via insights only).
+      rows: isMonthly ? [] : rows,
       insights: insights || null,
     },
   });

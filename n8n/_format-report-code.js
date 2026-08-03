@@ -96,7 +96,11 @@ function buildDailyHtml(rows) {
 }
 
 function buildInsightsHtml(insights) {
-  if (!insights || !insights.length) return '';
+  if (!insights || !insights.length) {
+    return `<p style="margin:0;padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px;border:1px solid ${brand.line};border-radius:8px">
+  No monthly summary for this view. Ensure your team members are assigned under your team in AIMS.
+</p>`;
+  }
   const body = insights
     .map(
       (i) => `<tr>
@@ -115,8 +119,8 @@ function buildInsightsHtml(insights) {
     )
     .join('');
   return `
-<div style="margin:0 0 28px">
-  <h2 style="margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600">Monthly insights</h2>
+<div>
+  <h2 style="margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600">Monthly summary</h2>
   <p style="margin:0 0 14px;color:${brand.muted};font-size:13px">
     Worked vs expected (shift days − holidays − leave). Onsite = Office · Remote = Remote In.
   </p>
@@ -138,6 +142,9 @@ function buildInsightsHtml(insights) {
     </thead>
     <tbody>${body}</tbody>
   </table>
+  <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
+    ${insights.length} employee${insights.length === 1 ? '' : 's'}
+  </p>
 </div>`;
 }
 
@@ -145,13 +152,39 @@ function buildEmailHtml({ toName, roleLabel, rows, insights }) {
   const rangeLabel = from === to ? from : `${from} → ${to}`;
   const periodTitle =
     period === 'daily' ? 'Daily' : period === 'weekly' ? 'Weekly' : 'Monthly';
-  const insightsHtml = period === 'monthly' ? buildInsightsHtml(insights || []) : '';
+  const isMonthly = period === 'monthly';
+  const insightsHtml = isMonthly ? buildInsightsHtml(insights || []) : '';
   const daily = buildDailyHtml(rows);
   const emptyDaily = `<tr>
   <td colspan="8" style="padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px">
     No attendance rows in this view. Ensure your team members are assigned under your team in AIMS.
   </td>
 </tr>`;
+  const dailySection = isMonthly
+    ? ''
+    : `<div>
+                <h2 style="margin:0 0 14px;font-size:16px;color:${brand.ink};font-weight:600">Daily detail</h2>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
+                  <thead>
+                    <tr>
+                      <th style="${th}">Team</th>
+                      <th style="${th}">Employee</th>
+                      <th style="${th}">Date</th>
+                      <th style="${th}">Check-in</th>
+                      <th style="${th}">Check-out</th>
+                      <th style="${th}">Status</th>
+                      <th style="${th}">Mode</th>
+                      <th style="${th}">Worked</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${daily || emptyDaily}
+                  </tbody>
+                </table>
+                <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
+                  ${(rows || []).length} row${(rows || []).length === 1 ? '' : 's'}
+                </p>
+              </div>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -186,34 +219,12 @@ function buildEmailHtml({ toName, roleLabel, rows, insights }) {
             <td style="padding:28px">
               <p style="margin:0 0 8px;font-size:15px;color:${brand.ink}">Hi ${esc(toName)},</p>
               <p style="margin:0 0 22px;font-size:14px;color:${brand.muted};line-height:1.55">
-                Here is your <strong style="color:${brand.ink}">${esc(period)}</strong> attendance report for
+                Here is your <strong style="color:${brand.ink}">${esc(period)}</strong> attendance ${isMonthly ? 'summary' : 'report'} for
                 <strong style="color:${brand.ink}">${esc(rangeLabel)}</strong>
                 <span style="color:${brand.teal}"> · ${esc(roleLabel)} view</span>.
               </p>
               ${insightsHtml}
-              <div>
-                <h2 style="margin:0 0 14px;font-size:16px;color:${brand.ink};font-weight:600">Daily detail</h2>
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
-                  <thead>
-                    <tr>
-                      <th style="${th}">Team</th>
-                      <th style="${th}">Employee</th>
-                      <th style="${th}">Date</th>
-                      <th style="${th}">Check-in</th>
-                      <th style="${th}">Check-out</th>
-                      <th style="${th}">Status</th>
-                      <th style="${th}">Mode</th>
-                      <th style="${th}">Worked</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${daily || emptyDaily}
-                  </tbody>
-                </table>
-                <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
-                  ${(rows || []).length} row${(rows || []).length === 1 ? '' : 's'}
-                </p>
-              </div>
+              ${dailySection}
             </td>
           </tr>
           <tr>
@@ -233,9 +244,9 @@ function buildEmailHtml({ toName, roleLabel, rows, insights }) {
 }
 
 function buildInsightsMarkdown(insights) {
-  if (!insights || !insights.length) return '';
+  if (!insights || !insights.length) return '_No monthly summary for this view._\n';
   const lines = [
-    '### Monthly insights',
+    '### Monthly summary',
     '',
     '| Team | Employee | Worked | Expected | Variance | Onsite | Remote | Present | Absent | Leave | Late |',
     '| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
@@ -282,22 +293,33 @@ function buildClickUpMarkdown({ rows, insights }) {
         ? `Weekly attendance — ${from} → ${to}`
         : `Monthly attendance — ${from} → ${to}`;
 
-  const MAX_DAILY_ROWS = 80;
-  const clipped = (rows || []).slice(0, MAX_DAILY_ROWS);
-  const more =
-    (rows || []).length > MAX_DAILY_ROWS
-      ? `\n_…and ${(rows || []).length - MAX_DAILY_ROWS} more rows (see email for full detail)._\n`
-      : '';
+  const isMonthly = period === 'monthly';
+  const employeeCount = isMonthly
+    ? (insights || []).length
+    : new Set((rows || []).map((r) => r.employeeId)).size;
 
   const parts = [
     `## ${title}`,
     '',
-    `Period: **${rangeLabel}** · Employees in view: **${new Set((rows || []).map((r) => r.employeeId)).size}** · Rows: **${(rows || []).length}**`,
+    isMonthly
+      ? `Period: **${rangeLabel}** · Employees in view: **${employeeCount}** (summary only)`
+      : `Period: **${rangeLabel}** · Employees in view: **${employeeCount}** · Rows: **${(rows || []).length}**`,
     '',
   ];
-  if (period === 'monthly') parts.push(buildInsightsMarkdown(insights || []));
-  parts.push(buildDailyMarkdown(clipped));
-  if (more) parts.push(more);
+
+  if (isMonthly) {
+    parts.push(buildInsightsMarkdown(insights || []));
+  } else {
+    const MAX_DAILY_ROWS = 80;
+    const clipped = (rows || []).slice(0, MAX_DAILY_ROWS);
+    const more =
+      (rows || []).length > MAX_DAILY_ROWS
+        ? `\n_…and ${(rows || []).length - MAX_DAILY_ROWS} more rows (see email for full detail)._\n`
+        : '';
+    parts.push(buildDailyMarkdown(clipped));
+    if (more) parts.push(more);
+  }
+
   parts.push('_Sent by Aidapt ALMS_');
   return parts.join('\n');
 }
@@ -348,7 +370,11 @@ const emails = targets.map((t) => {
     insights = report ? report.insights || [] : [];
     roleLabel = 'team';
     // Safety net if API scope is empty (e.g. manager_id not set yet): filter by team name.
-    if (!rows.length && t.teamHints && t.teamHints.length) {
+    if (
+      (!(rows || []).length || (period === 'monthly' && !(insights || []).length)) &&
+      t.teamHints &&
+      t.teamHints.length
+    ) {
       rows = filterByTeamHints(allRows, t.teamHints);
       insights = filterByTeamHints(allInsights, t.teamHints);
     }
@@ -367,7 +393,7 @@ const emails = targets.map((t) => {
     period,
     from,
     toDate: to,
-    rowCount: (rows || []).length,
+    rowCount: period === 'monthly' ? (insights || []).length : (rows || []).length,
     scope: roleLabel,
   };
 });
