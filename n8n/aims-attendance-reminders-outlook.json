@@ -3,7 +3,7 @@
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "3995614c53330b8235732b6439f4722022fa77b84f9cd17e44c49abe50c94c1f",
-    "description": "Every minute triggers AIMS reminder job; webhook receives attendance.reminder and emails via Outlook (Aidapt branded). Set N8N_EMAIL_WEBHOOK_URL to this webhook Production URL."
+    "description": "Every minute triggers AIMS reminder job; dedicated webhook receives reminder POSTs and emails via Outlook. Set N8N_ATTENDANCE_REMINDER_WEBHOOK_URL to this webhook Production URL."
   },
   "settings": {
     "executionOrder": "v1",
@@ -82,26 +82,26 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "aims-email",
+        "path": "aims-attendance-reminders",
         "responseMode": "onReceived",
         "options": {}
       },
-      "id": "webhook-email",
-      "name": "Webhook — AIMS email events",
+      "id": "webhook-reminders",
+      "name": "Webhook — attendance reminders",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
         -200,
         420
       ],
-      "webhookId": "aims-email-webhook"
+      "webhookId": "aims-attendance-reminders-webhook"
     },
     {
       "parameters": {
-        "jsCode": "const raw = items[0].json;\n// n8n Webhook v2 often puts the POST JSON on .body\nconst payload =\n  raw.body && typeof raw.body === 'object' && (raw.body.event || raw.body.to || raw.body.emailReason)\n    ? raw.body\n    : raw;\nconst event = payload.event || '';\nconst reason = payload.emailReason || '';\nif (event !== 'attendance.reminder' && reason !== 'attendance_reminder') {\n  return [];\n}\nreturn [{ json: payload }];\n"
+        "jsCode": "const raw = items[0].json;\n// Dedicated reminder webhook — unwrap n8n Webhook v2 .body if present.\nconst payload =\n  raw.body && typeof raw.body === 'object' && (raw.body.event || raw.body.to || raw.body.emailReason || raw.body.subject)\n    ? raw.body\n    : raw;\nif (!payload.to && !payload.employeeEmail) {\n  throw new Error('Reminder webhook payload missing to/employeeEmail');\n}\nreturn [{ json: payload }];\n"
       },
-      "id": "filter-reminder-only",
-      "name": "Filter — reminders only",
+      "id": "unwrap-reminder-payload",
+      "name": "Unwrap reminder payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -171,18 +171,18 @@
         ]
       ]
     },
-    "Webhook — AIMS email events": {
+    "Webhook — attendance reminders": {
       "main": [
         [
           {
-            "node": "Filter — reminders only",
+            "node": "Unwrap reminder payload",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Filter — reminders only": {
+    "Unwrap reminder payload": {
       "main": [
         [
           {

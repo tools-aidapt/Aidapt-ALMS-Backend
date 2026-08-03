@@ -23,14 +23,13 @@ const configured = Boolean(webhookUrl);
 const httpClient = axios.create({ timeout: 15000 });
 
 /**
- * POST one email event to n8n. All email types use the single configured
- * webhook (N8N_EMAIL_WEBHOOK_URL); the n8n side branches on `event` /
- * `emailReason`.
- * @param {string} event  e.g. 'generic' | 'leave.approval_request' | 'auth.password_reset_otp'
+ * POST one email event to an n8n webhook.
+ * @param {string} event  e.g. 'generic' | 'leave.approval_request' | 'attendance.reminder'
  * @param {object} payload rendered + structured fields
+ * @param {{url?: string}} [opts] optional override webhook URL (dedicated flows)
  */
-async function dispatch(event, payload) {
-  const url = webhookUrl;
+async function dispatch(event, payload, opts = {}) {
+  const url = opts.url || webhookUrl;
   const body = { event, from: env.email.from, ...payload };
 
   if (!url) {
@@ -226,6 +225,7 @@ function sendPasswordResetOtp({ email, name, otp, expiresMinutes = 10 }) {
 
 /**
  * Attendance check-in / check-out reminder at shift start or end.
+ * Uses N8N_ATTENDANCE_REMINDER_WEBHOOK_URL when set (falls back to N8N_EMAIL_WEBHOOK_URL).
  * @param {{to, employeeName, type: 'checkin'|'checkout', date, shiftTime, checkInTime?}} args
  */
 function sendAttendanceReminder({ to, employeeName, type, date, shiftTime, checkInTime }) {
@@ -246,22 +246,26 @@ function sendAttendanceReminder({ to, employeeName, type, date, shiftTime, check
          Please check out on ALMS.</p>
     `;
 
-  return dispatch('attendance.reminder', {
-    emailReason: 'attendance_reminder',
-    to,
-    employeeName: employeeName || null,
-    employeeEmail: to,
-    subject,
-    html,
-    text: stripHtml(html),
-    data: {
-      type,
-      date,
-      shiftTime,
-      checkInTime: checkInTime || null,
-      checkInTimePkt: checkInTime ? pktTimeLabel(checkInTime) : null,
+  return dispatch(
+    'attendance.reminder',
+    {
+      emailReason: 'attendance_reminder',
+      to,
+      employeeName: employeeName || null,
+      employeeEmail: to,
+      subject,
+      html,
+      text: stripHtml(html),
+      data: {
+        type,
+        date,
+        shiftTime,
+        checkInTime: checkInTime || null,
+        checkInTimePkt: checkInTime ? pktTimeLabel(checkInTime) : null,
+      },
     },
-  });
+    { url: env.email.attendanceReminderWebhookUrl }
+  );
 }
 
 /**

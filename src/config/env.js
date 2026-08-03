@@ -57,6 +57,10 @@ const env = {
     passwordResetWebhookUrl:
       optional('N8N_PASSWORD_RESET_WEBHOOK_URL', '') ||
       optional('N8N_EMAIL_WEBHOOK_URL', ''),
+    // Dedicated webhook for check-in / check-out reminders; falls back to general.
+    attendanceReminderWebhookUrl:
+      optional('N8N_ATTENDANCE_REMINDER_WEBHOOK_URL', '') ||
+      optional('N8N_EMAIL_WEBHOOK_URL', ''),
   },
 
   appBaseUrl: optional('APP_BASE_URL', 'http://localhost:4000'),

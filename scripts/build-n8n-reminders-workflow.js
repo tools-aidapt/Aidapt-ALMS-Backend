@@ -11,15 +11,13 @@ const formatCode = fs.readFileSync('n8n/_format-reminder-email.js', 'utf8');
 new Function('items', formatCode);
 
 const filterCode = `const raw = items[0].json;
-// n8n Webhook v2 often puts the POST JSON on .body
+// Dedicated reminder webhook — unwrap n8n Webhook v2 .body if present.
 const payload =
-  raw.body && typeof raw.body === 'object' && (raw.body.event || raw.body.to || raw.body.emailReason)
+  raw.body && typeof raw.body === 'object' && (raw.body.event || raw.body.to || raw.body.emailReason || raw.body.subject)
     ? raw.body
     : raw;
-const event = payload.event || '';
-const reason = payload.emailReason || '';
-if (event !== 'attendance.reminder' && reason !== 'attendance_reminder') {
-  return [];
+if (!payload.to && !payload.employeeEmail) {
+  throw new Error('Reminder webhook payload missing to/employeeEmail');
 }
 return [{ json: payload }];
 `;
@@ -30,7 +28,7 @@ const workflow = {
     templateCredsSetupCompleted: true,
     instanceId: '3995614c53330b8235732b6439f4722022fa77b84f9cd17e44c49abe50c94c1f',
     description:
-      'Every minute triggers AIMS reminder job; webhook receives attendance.reminder and emails via Outlook (Aidapt branded). Set N8N_EMAIL_WEBHOOK_URL to this webhook Production URL.',
+      'Every minute triggers AIMS reminder job; dedicated webhook receives reminder POSTs and emails via Outlook. Set N8N_ATTENDANCE_REMINDER_WEBHOOK_URL to this webhook Production URL.',
   },
   settings: {
     executionOrder: 'v1',
@@ -87,21 +85,21 @@ const workflow = {
     {
       parameters: {
         httpMethod: 'POST',
-        path: 'aims-email',
+        path: 'aims-attendance-reminders',
         responseMode: 'onReceived',
         options: {},
       },
-      id: 'webhook-email',
-      name: 'Webhook — AIMS email events',
+      id: 'webhook-reminders',
+      name: 'Webhook — attendance reminders',
       type: 'n8n-nodes-base.webhook',
       typeVersion: 2,
       position: [-200, 420],
-      webhookId: 'aims-email-webhook',
+      webhookId: 'aims-attendance-reminders-webhook',
     },
     {
       parameters: { jsCode: filterCode },
-      id: 'filter-reminder-only',
-      name: 'Filter — reminders only',
+      id: 'unwrap-reminder-payload',
+      name: 'Unwrap reminder payload',
       type: 'n8n-nodes-base.code',
       typeVersion: 2,
       position: [120, 420],
@@ -144,10 +142,10 @@ const workflow = {
     'Manual Test reminders': {
       main: [[{ node: 'Call AIMS attendance-reminders', type: 'main', index: 0 }]],
     },
-    'Webhook — AIMS email events': {
-      main: [[{ node: 'Filter — reminders only', type: 'main', index: 0 }]],
+    'Webhook — attendance reminders': {
+      main: [[{ node: 'Unwrap reminder payload', type: 'main', index: 0 }]],
     },
-    'Filter — reminders only': {
+    'Unwrap reminder payload': {
       main: [[{ node: 'Format Aidapt reminder email', type: 'main', index: 0 }]],
     },
     'Format Aidapt reminder email': {
