@@ -1,0 +1,208 @@
+{
+  "name": "AIMS — Attendance Reminders → Outlook",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3995614c53330b8235732b6439f4722022fa77b84f9cd17e44c49abe50c94c1f",
+    "description": "Every minute triggers AIMS reminder job; webhook receives attendance.reminder and emails via Outlook (Aidapt branded). Set N8N_EMAIL_WEBHOOK_URL to this webhook Production URL."
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi"
+  },
+  "active": false,
+  "pinData": {},
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "* * * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-reminders-every-min",
+      "name": "Cron every minute PKT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -200,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "manual-reminders",
+      "name": "Manual Test reminders",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aidapt-alms-backend-3was.onrender.com/api/jobs/attendance-reminders",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Job-Secret",
+              "value": "1a2b3c4d5e6f7g8h9i0j"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {}
+          }
+        }
+      },
+      "id": "http-run-reminders",
+      "name": "Call AIMS attendance-reminders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        120,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "aims-email",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-email",
+      "name": "Webhook — AIMS email events",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        420
+      ],
+      "webhookId": "aims-email-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json;\n// n8n Webhook v2 often puts the POST JSON on .body\nconst payload =\n  raw.body && typeof raw.body === 'object' && (raw.body.event || raw.body.to || raw.body.emailReason)\n    ? raw.body\n    : raw;\nconst event = payload.event || '';\nconst reason = payload.emailReason || '';\nif (event !== 'attendance.reminder' && reason !== 'attendance_reminder') {\n  return [];\n}\nreturn [{ json: payload }];\n"
+      },
+      "id": "filter-reminder-only",
+      "name": "Filter — reminders only",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json;\n// Webhook may wrap the POST body under .body\nconst body =\n  raw.body && typeof raw.body === 'object' && (raw.body.event || raw.body.to)\n    ? { ...raw.body }\n    : { ...raw };\n\nconst to = body.to || body.employeeEmail;\nconst employeeName = body.employeeName || body.data?.employeeName || '';\nconst type = body.data?.type || (String(body.subject || '').toLowerCase().includes('check out') ? 'checkout' : 'checkin');\nconst date = body.data?.date || '';\nconst shiftTime = body.data?.shiftTime || '';\nconst checkInPkt = body.data?.checkInTimePkt || null;\nconst subject =\n  body.subject ||\n  (type === 'checkout'\n    ? `Reminder: please check out (${date})`\n    : `Reminder: please check in (${date})`);\n\nif (!to) {\n  throw new Error('Reminder payload missing \"to\" email');\n}\n\nconst brand = {\n  navy: '#07111F',\n  teal: '#14B8A6',\n  tealDark: '#0F766E',\n  ink: '#0B1220',\n  muted: '#5B6575',\n  line: '#E6E9EF',\n  surface: '#F7F8FA',\n  white: '#FFFFFF',\n};\n\nfunction esc(s) {\n  return String(s ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n}\n\nconst isCheckIn = type === 'checkin';\nconst title = isCheckIn ? 'Check-in reminder' : 'Check-out reminder';\nconst lead = isCheckIn\n  ? `Your shift starts at <strong style=\"color:${brand.ink}\">${esc(shiftTime)}</strong> PKT today (${esc(date)}).`\n  : `Your shift ends at <strong style=\"color:${brand.ink}\">${esc(shiftTime)}</strong> PKT today (${esc(date)}).`;\nconst detail = isCheckIn\n  ? 'Please check in on ALMS if you have not already.'\n  : `You are still checked in${checkInPkt ? ` (since ${esc(checkInPkt)})` : ''}. Please check out on ALMS.`;\n\nconst html = `<!DOCTYPE html>\n<html lang=\"en\">\n<body style=\"margin:0;padding:0;background:${brand.surface};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${brand.surface};padding:24px 12px\">\n    <tr>\n      <td align=\"center\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;background:${brand.white};border:1px solid ${brand.line};border-radius:12px;overflow:hidden\">\n          <tr>\n            <td style=\"background:${brand.navy};padding:22px 28px\">\n              <div style=\"font-size:20px;font-weight:700;color:${brand.white};letter-spacing:-0.02em\">\n                Aidapt<span style=\"color:${brand.teal}\">.</span>\n              </div>\n              <div style=\"margin-top:4px;font-size:12px;color:rgba(255,255,255,0.65);letter-spacing:0.06em;text-transform:uppercase\">\n                Attendance &amp; Leave · ALMS\n              </div>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"height:3px;background:${brand.teal};font-size:0;line-height:0\">&nbsp;</td>\n          </tr>\n          <tr>\n            <td style=\"padding:28px\">\n              <p style=\"margin:0 0 6px;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:${brand.teal};font-weight:600\">\n                ${esc(title)}\n              </p>\n              <p style=\"margin:0 0 16px;font-size:15px;color:${brand.ink}\">\n                Hi ${esc(employeeName || 'there')},\n              </p>\n              <p style=\"margin:0 0 12px;font-size:14px;color:${brand.muted};line-height:1.55\">\n                ${lead}\n              </p>\n              <p style=\"margin:0 0 22px;font-size:14px;color:${brand.muted};line-height:1.55\">\n                ${detail}\n              </p>\n              <div style=\"padding:14px 16px;background:${brand.surface};border:1px solid ${brand.line};border-radius:8px\">\n                <p style=\"margin:0;font-size:12px;color:${brand.muted}\">\n                  Shift time · <strong style=\"color:${brand.ink}\">${esc(shiftTime)} PKT</strong>\n                  ${date ? ` · ${esc(date)}` : ''}\n                </p>\n              </div>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"padding:16px 28px;background:${brand.surface};border-top:1px solid ${brand.line}\">\n              <p style=\"margin:0;font-size:11px;color:${brand.muted};line-height:1.5\">\n                Sent by Aidapt ALMS ·\n                <a href=\"https://aidapt.co\" style=\"color:${brand.tealDark};text-decoration:none\">aidapt.co</a>\n              </p>\n            </td>\n          </tr>\n        </table>\n      </td>\n    </tr>\n  </table>\n</body>\n</html>`;\n\nreturn [\n  {\n    json: {\n      to,\n      subject,\n      html,\n      type,\n      date,\n      shiftTime,\n      employeeName,\n    },\n  },\n];\n"
+      },
+      "id": "format-reminder-email",
+      "name": "Format Aidapt reminder email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "={{ $json.html }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "id": "outlook-send-reminder",
+      "name": "Send reminder via Outlook",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        680,
+        420
+      ],
+      "webhookId": "bb46f75e-ebca-42ff-acd4-c2070fa0ba46",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "m9WTLZOWpRKaVwEa",
+          "name": "Sofi"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cron every minute PKT": {
+      "main": [
+        [
+          {
+            "node": "Call AIMS attendance-reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test reminders": {
+      "main": [
+        [
+          {
+            "node": "Call AIMS attendance-reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook — AIMS email events": {
+      "main": [
+        [
+          {
+            "node": "Filter — reminders only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter — reminders only": {
+      "main": [
+        [
+          {
+            "node": "Format Aidapt reminder email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Aidapt reminder email": {
+      "main": [
+        [
+          {
+            "node": "Send reminder via Outlook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
