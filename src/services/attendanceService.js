@@ -34,9 +34,12 @@ const { conflict, notFound } = require('../middleware/errorHandler');
 function serialize(rec) {
   const f = rec.fields;
   const workedMinutes = f.WorkedMinutes ?? null;
+  const employee = f.Employee || [];
   return {
     id: rec.id,
-    employee: f.Employee || [],
+    employee,
+    // Scalar owner id for client defence-in-depth (alongside `employee` link array).
+    employeeId: employee[0] || null,
     date: f.Date || null,
     checkInTime: f.CheckInTime || null,
     checkOutTime: f.CheckOutTime || null,

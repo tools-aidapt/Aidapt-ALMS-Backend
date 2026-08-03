@@ -3,6 +3,7 @@
 const { z } = require('zod');
 const { asyncHandler } = require('../utils/asyncHandler');
 const attendanceService = require('../services/attendanceService');
+const { resolveEmployeeRecordScope } = require('../utils/employeeRecordScope');
 const { ROLES } = require('../middleware/auth');
 const { forbidden } = require('../middleware/errorHandler');
 
@@ -35,14 +36,19 @@ const checkOut = asyncHandler(async (req, res) => {
   res.json({ data: punch });
 });
 
+/**
+ * List punches for exactly one employee.
+ * Scoping is enforced here via resolveEmployeeRecordScope (token-derived):
+ * omitted employeeId ⇒ caller's own rows for every role.
+ */
 const list = asyncHandler(async (req, res) => {
-  const filters = { ...req.query };
-  // Employees may only read their own attendance; managers/HR admins may
-  // filter by any employee.
-  if (req.user.role === ROLES.EMPLOYEE) {
-    filters.employeeId = req.user.id;
-  }
-  const rows = await attendanceService.list(filters);
+  const employeeId = await resolveEmployeeRecordScope(req.user, req.query.employeeId);
+  const rows = await attendanceService.list({
+    employeeId,
+    from: req.query.from,
+    to: req.query.to,
+    status: req.query.status,
+  });
   res.json({ data: rows });
 });
 

@@ -265,47 +265,211 @@ function sendAttendanceReminder({ to, employeeName, type, date, shiftTime, check
 }
 
 /**
- * Attendance report for Managers / HR Admin.
- * @param {{to, recipientName, role, period, from, to: toDate, subject, rows}} args
+ * Attendance report for Managers / team leads / HR Admin.
+ * Monthly reports may include `insights` (worked vs expected, onsite/remote, etc.).
+ * HTML follows Aidapt brand: navy + teal, operator-led clarity.
+ * @param {{to, recipientName, role, period, from, to: toDate, subject, rows, insights?}} args
  */
-function sendAttendanceReport({ to, recipientName, role, period, from, to: toDate, subject, rows }) {
+function sendAttendanceReport({
+  to,
+  recipientName,
+  role,
+  period,
+  from,
+  to: toDate,
+  subject,
+  rows,
+  insights,
+}) {
+  // Aidapt brand tokens (aidapt.co — operator-led AI firm)
+  const brand = {
+    navy: '#07111F',
+    teal: '#14B8A6',
+    tealDark: '#0F766E',
+    ink: '#0B1220',
+    muted: '#5B6575',
+    line: '#E6E9EF',
+    surface: '#F7F8FA',
+    white: '#FFFFFF',
+    late: '#B45309',
+  };
+
+  const th = `padding:10px 12px;border-bottom:1px solid ${brand.line};text-align:left;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:${brand.muted};font-weight:600;background:${brand.surface}`;
+  const td = `padding:10px 12px;border-bottom:1px solid ${brand.line};font-size:13px;color:${brand.ink};vertical-align:top`;
+  const tdCenter = `${td};text-align:center`;
+
   const tableRows = (rows || [])
-    .map(
-      (r) => `
+    .map((r) => {
+      const checkOut =
+        r.status === 'Still checked in'
+          ? 'Still checked in'
+          : r.status === 'On Leave'
+            ? '—'
+            : r.checkOutTime || '—';
+      const statusLabel = `${r.status || ''}${r.isLate ? ' (Late)' : ''}`;
+      const statusColor =
+        r.status === 'Absent'
+          ? '#B91C1C'
+          : r.status === 'On Leave'
+            ? brand.tealDark
+            : r.status === 'Still checked in'
+              ? brand.late
+              : r.isLate
+                ? brand.late
+                : brand.ink;
+      return `
       <tr>
-        <td style="padding:4px 8px;border:1px solid #ddd">${escapeHtml(r.teamName || '—')}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd">${escapeHtml(r.employeeName || '')}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd">${r.date}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd">${r.checkInTime || '—'}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd">${r.checkOutTime || '—'}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd">${escapeHtml(r.status || '')}${r.isLate ? ' (Late)' : ''}</td>
-        <td style="padding:4px 8px;border:1px solid #ddd">${r.workedDuration || '—'}</td>
+        <td style="${td}">${escapeHtml(r.teamName || '—')}</td>
+        <td style="${td}"><strong>${escapeHtml(r.employeeName || '')}</strong></td>
+        <td style="${td}">${r.date}</td>
+        <td style="${td}">${r.status === 'On Leave' ? '—' : r.checkInTime || '—'}</td>
+        <td style="${td}">${escapeHtml(checkOut)}</td>
+        <td style="${td};color:${statusColor}">${escapeHtml(statusLabel)}</td>
+        <td style="${td}">${escapeHtml(r.mode || '—')}</td>
+        <td style="${td}">${r.workedDuration || '—'}</td>
+      </tr>`;
+    })
+    .join('');
+
+  const insightRows = (insights || [])
+    .map(
+      (i) => `
+      <tr>
+        <td style="${td}">${escapeHtml(i.teamName || '—')}</td>
+        <td style="${td}"><strong>${escapeHtml(i.employeeName || '')}</strong></td>
+        <td style="${td}">${escapeHtml(i.workedDuration || '—')}</td>
+        <td style="${td}">${escapeHtml(i.expectedDuration || '—')}</td>
+        <td style="${td}">${escapeHtml(i.hoursVarianceDuration || '—')}</td>
+        <td style="${tdCenter}">${i.onsiteDays}</td>
+        <td style="${tdCenter}">${i.remoteDays}</td>
+        <td style="${tdCenter}">${i.presentDays}</td>
+        <td style="${tdCenter}">${i.absentDays}</td>
+        <td style="${tdCenter}">${i.leaveDays}</td>
+        <td style="${tdCenter}">${i.lateDays}</td>
       </tr>`
     )
     .join('');
 
+  const rangeLabel = from === toDate ? from : `${from} → ${toDate}`;
+  const periodTitle =
+    period === 'daily' ? 'Daily' : period === 'weekly' ? 'Weekly' : 'Monthly';
+
+  const insightsSection =
+    period === 'monthly' && insights && insights.length
+      ? `
+    <div style="margin:0 0 28px">
+      <h2 style="margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600">Monthly insights</h2>
+      <p style="margin:0 0 14px;color:${brand.muted};font-size:13px">
+        Worked vs expected (shift days − holidays − leave). Onsite = Office · Remote = Remote In.
+      </p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
+        <thead>
+          <tr>
+            <th style="${th}">Team</th>
+            <th style="${th}">Employee</th>
+            <th style="${th}">Worked</th>
+            <th style="${th}">Expected</th>
+            <th style="${th}">Variance</th>
+            <th style="${th}">Onsite</th>
+            <th style="${th}">Remote</th>
+            <th style="${th}">Present</th>
+            <th style="${th}">Absent</th>
+            <th style="${th}">Leave</th>
+            <th style="${th}">Late</th>
+          </tr>
+        </thead>
+        <tbody>${insightRows}</tbody>
+      </table>
+    </div>`
+      : '';
+
+  const emptyDaily = `
+    <tr>
+      <td colspan="8" style="padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px">
+        No attendance rows in this view. If you lead a team, ensure members are assigned to your team in AIMS.
+      </td>
+    </tr>`;
+
   const html = `
-    <p>Hi ${escapeHtml(recipientName || '')},</p>
-    <p>Here is the <strong>${escapeHtml(period)}</strong> attendance report
-       for ${from === toDate ? from : `${from} → ${toDate}`}
-       (${escapeHtml(role || '')} view).</p>
-    <table style="border-collapse:collapse;font-size:13px">
-      <thead>
-        <tr>
-          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Team</th>
-          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Employee</th>
-          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Date</th>
-          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Check-in</th>
-          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Check-out</th>
-          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Status</th>
-          <th style="padding:4px 8px;border:1px solid #ddd;text-align:left">Worked</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${tableRows || '<tr><td colspan="7" style="padding:8px">No rows</td></tr>'}
-      </tbody>
-    </table>
-  `;
+<!DOCTYPE html>
+<html lang="en">
+<body style="margin:0;padding:0;background:${brand.surface};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${brand.surface};padding:24px 12px">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:880px;background:${brand.white};border:1px solid ${brand.line};border-radius:12px;overflow:hidden">
+          <tr>
+            <td style="background:${brand.navy};padding:22px 28px">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <div style="font-size:20px;font-weight:700;color:${brand.white};letter-spacing:-0.02em">
+                      Aidapt<span style="color:${brand.teal}">.</span>
+                    </div>
+                    <div style="margin-top:4px;font-size:12px;color:rgba(255,255,255,0.65);letter-spacing:0.06em;text-transform:uppercase">
+                      Attendance &amp; Leave · ALMS
+                    </div>
+                  </td>
+                  <td align="right" style="color:${brand.teal};font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase">
+                    ${escapeHtml(periodTitle)} report
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="height:3px;background:${brand.teal};font-size:0;line-height:0">&nbsp;</td>
+          </tr>
+          <tr>
+            <td style="padding:28px">
+              <p style="margin:0 0 8px;font-size:15px;color:${brand.ink}">
+                Hi ${escapeHtml(recipientName || '')},
+              </p>
+              <p style="margin:0 0 22px;font-size:14px;color:${brand.muted};line-height:1.55">
+                Here is your <strong style="color:${brand.ink}">${escapeHtml(period)}</strong> attendance report for
+                <strong style="color:${brand.ink}">${escapeHtml(rangeLabel)}</strong>
+                <span style="color:${brand.teal}"> · ${escapeHtml(role || 'team')} view</span>.
+              </p>
+              ${insightsSection}
+              <div>
+                <h2 style="margin:0 0 14px;font-size:16px;color:${brand.ink};font-weight:600">Daily detail</h2>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
+                  <thead>
+                    <tr>
+                      <th style="${th}">Team</th>
+                      <th style="${th}">Employee</th>
+                      <th style="${th}">Date</th>
+                      <th style="${th}">Check-in</th>
+                      <th style="${th}">Check-out</th>
+                      <th style="${th}">Status</th>
+                      <th style="${th}">Mode</th>
+                      <th style="${th}">Worked</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${tableRows || emptyDaily}
+                  </tbody>
+                </table>
+                <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
+                  ${(rows || []).length} row${(rows || []).length === 1 ? '' : 's'}
+                </p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 28px;background:${brand.surface};border-top:1px solid ${brand.line}">
+              <p style="margin:0;font-size:11px;color:${brand.muted};line-height:1.5">
+                Sent by Aidapt ALMS · The operator’s AI firm ·
+                <a href="https://aidapt.co" style="color:${brand.tealDark};text-decoration:none">aidapt.co</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 
   return dispatch('attendance.report', {
     emailReason: 'attendance_report',
@@ -321,6 +485,7 @@ function sendAttendanceReport({ to, recipientName, role, period, from, to: toDat
       to: toDate,
       role,
       rows,
+      insights: insights || null,
     },
   });
 }

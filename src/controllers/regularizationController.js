@@ -3,6 +3,7 @@
 const { z } = require('zod');
 const { asyncHandler } = require('../utils/asyncHandler');
 const regularizationService = require('../services/regularizationService');
+const { resolveEmployeeRecordScope } = require('../utils/employeeRecordScope');
 const { ROLES } = require('../middleware/auth');
 const { forbidden } = require('../middleware/errorHandler');
 
@@ -39,12 +40,16 @@ const submit = asyncHandler(async (req, res) => {
   res.status(201).json({ data: request });
 });
 
-// Scoped list: Employee -> own; Manager -> their approval queue; HR Admin -> all.
+/**
+ * List regularization requests for exactly one employee.
+ * Same scope as GET /api/attendance: omitted employeeId ⇒ caller's own rows.
+ */
 const list = asyncHandler(async (req, res) => {
-  const filters = { ...req.query };
-  if (req.user.role === ROLES.EMPLOYEE) filters.employeeId = req.user.id;
-  else if (req.user.role === ROLES.MANAGER) filters.managerId = req.user.id;
-  const rows = await regularizationService.list(filters);
+  const employeeId = await resolveEmployeeRecordScope(req.user, req.query.employeeId);
+  const rows = await regularizationService.list({
+    employeeId,
+    status: req.query.status,
+  });
   res.json({ data: rows });
 });
 

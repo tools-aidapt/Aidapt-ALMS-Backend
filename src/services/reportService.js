@@ -2,49 +2,131 @@
 
 const Employee = require('../models/Employee');
 const Team = require('../models/Team');
+const Shift = require('../models/Shift');
+const Holiday = require('../models/Holiday');
 const AttendancePunch = require('../models/AttendancePunch');
 const { claimReport } = require('../models/AttendanceNotificationLog');
 const emailService = require('./emailService');
+const { query } = require('../config/db');
 const {
   todayPktDateStr,
   dateRangeInclusive,
   formatHoursMinutes,
   pktHm,
   dowForDateStr,
+  round2,
 } = require('../utils/dateUtils');
+const { shiftLengthHours } = require('../utils/attendanceCalc');
 const { ROLES } = require('../middleware/auth');
+
+const DEFAULT_WORKING_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
 function pad(n) {
   return String(n).padStart(2, '0');
 }
 
 /**
+ * Display status for a report row.
+ * Leave (approved request or punch) wins; open check-in shows "Still checked in".
+ */
+function displayStatus(punch, onLeave) {
+  if (onLeave || (punch && punch.fields.Status === 'On Leave')) return 'On Leave';
+  if (!punch) return 'No record';
+  const f = punch.fields;
+  if (f.Status === 'Holiday') return 'Holiday';
+  if (f.Status === 'Absent') return 'Absent';
+  if (f.CheckInTime && !f.CheckOutTime) return 'Still checked in';
+  return f.Status || 'Present';
+}
+
+/**
  * Build one attendance row for a punch (or absent placeholder).
  */
-function rowFromPunch(employee, punch, dateStr, teamName = null) {
+function rowFromPunch(employee, punch, dateStr, teamName = null, onLeave = false) {
   const f = punch ? punch.fields : null;
-  const workedMinutes = f && f.WorkedMinutes != null ? Number(f.WorkedMinutes) : null;
+  const status = displayStatus(punch, onLeave);
+  const workedMinutes =
+    status === 'On Leave' || status === 'Still checked in'
+      ? null
+      : f && f.WorkedMinutes != null
+        ? Number(f.WorkedMinutes)
+        : null;
+  let mode = null;
+  if (status !== 'On Leave' && f && f.Mode) {
+    if (f.Mode === 'Office') mode = 'Office';
+    else if (f.Mode === 'Remote In') mode = 'Remote';
+  }
+
   return {
     employeeId: employee.id,
     employeeName: employee.fields.Name || null,
     teamId: (employee.fields.Team && employee.fields.Team[0]) || null,
     teamName,
     date: dateStr,
-    checkInTime: f && f.CheckInTime ? pktHm(f.CheckInTime) : null,
-    checkOutTime: f && f.CheckOutTime ? pktHm(f.CheckOutTime) : null,
-    status: f ? f.Status || 'Present' : 'No record',
+    checkInTime: f && f.CheckInTime && status !== 'On Leave' ? pktHm(f.CheckInTime) : null,
+    checkOutTime:
+      f && f.CheckOutTime && status !== 'On Leave' && status !== 'Still checked in'
+        ? pktHm(f.CheckOutTime)
+        : null,
+    status,
+    mode,
     workedMinutes,
     workedDuration: workedMinutes == null ? null : formatHoursMinutes(workedMinutes),
-    isLate: f ? Boolean(f.IsLate) : false,
+    isLate: status === 'On Leave' ? false : f ? Boolean(f.IsLate) : false,
+    lateByMinutes:
+      status === 'On Leave' ? 0 : f && f.LateByMinutes != null ? Number(f.LateByMinutes) : 0,
+    overtimeHours:
+      status === 'On Leave' || status === 'Still checked in'
+        ? null
+        : f && f.OvertimeHours != null
+          ? Number(f.OvertimeHours)
+          : null,
   };
+}
+
+/**
+ * Map employeeId → Set of YYYY-MM-DD dates covered by approved leave in [from, to].
+ */
+async function loadApprovedLeaveByEmployee(employeeIds, from, to) {
+  const map = new Map();
+  if (!employeeIds || !employeeIds.length) return map;
+
+  const { rows } = await query(
+    `SELECT employee_id, from_date, to_date
+       FROM leave_requests
+      WHERE status = 'Approved'
+        AND employee_id = ANY($1::uuid[])
+        AND from_date <= $3::date
+        AND to_date >= $2::date`,
+    [employeeIds, from, to]
+  );
+
+  for (const lr of rows) {
+    const empId = lr.employee_id;
+    if (!map.has(empId)) map.set(empId, new Set());
+    const set = map.get(empId);
+    const leaveFrom = String(lr.from_date).slice(0, 10);
+    const leaveTo = String(lr.to_date).slice(0, 10);
+    for (const d of dateRangeInclusive(leaveFrom, leaveTo)) {
+      if (d >= from && d <= to) set.add(d);
+    }
+  }
+  return map;
 }
 
 /**
  * Collect punch rows for a set of employees over [from, to] inclusive.
  * @returns {Promise<Array<object>>}
  */
-async function buildRows(employees, from, to, teamNameById = new Map()) {
+async function buildRows(employees, from, to, teamNameById = new Map(), leaveByEmployee = null) {
   const dates = dateRangeInclusive(from, to);
+  const leaveMap =
+    leaveByEmployee ||
+    (await loadApprovedLeaveByEmployee(
+      employees.map((e) => e.id),
+      from,
+      to
+    ));
   const rows = [];
   for (const emp of employees) {
     const punches = await AttendancePunch.query({
@@ -58,8 +140,9 @@ async function buildRows(employees, from, to, teamNameById = new Map()) {
     }
     const teamId = (emp.fields.Team && emp.fields.Team[0]) || null;
     const teamName = teamId ? teamNameById.get(teamId) || null : null;
+    const leaveSet = leaveMap.get(emp.id) || new Set();
     for (const d of dates) {
-      rows.push(rowFromPunch(emp, byDate.get(d) || null, d, teamName));
+      rows.push(rowFromPunch(emp, byDate.get(d) || null, d, teamName, leaveSet.has(d)));
     }
   }
   return rows.sort((a, b) => {
@@ -79,16 +162,17 @@ async function loadTeamNameMap(teamIds) {
   return map;
 }
 
-/** Recipients for a report run. When teamIds given: HR Admins + leads of those teams. */
+/** Recipients for a report run: HR Admins + Managers + active team leads. */
 async function reportRecipients(teamIds) {
+  const hr = await Employee.selectWhere(
+    "status = 'Active' AND role = 'HR Admin' AND email IS NOT NULL AND email <> ''",
+    [],
+    'ORDER BY name ASC'
+  );
+
   if (teamIds && teamIds.length) {
     const teams = await Team.findByIds(teamIds);
     const leadIds = teams.map((t) => (t.fields.Lead && t.fields.Lead[0]) || null).filter(Boolean);
-    const hr = await Employee.selectWhere(
-      "status = 'Active' AND role = 'HR Admin' AND email IS NOT NULL AND email <> ''",
-      [],
-      'ORDER BY name ASC'
-    );
     const leads = leadIds.length
       ? await Employee.selectWhere(
           "id = ANY($1::uuid[]) AND status = 'Active' AND email IS NOT NULL AND email <> ''",
@@ -101,53 +185,63 @@ async function reportRecipients(teamIds) {
     return Array.from(byId.values());
   }
 
-  return Employee.selectWhere(
-    "status = 'Active' AND role IN ('Manager', 'HR Admin') AND email IS NOT NULL AND email <> ''",
+  const managers = await Employee.selectWhere(
+    "status = 'Active' AND role = 'Manager' AND email IS NOT NULL AND email <> ''",
     [],
-    'ORDER BY role ASC, name ASC'
+    'ORDER BY name ASC'
   );
+  // Team leads may still be role=Employee — include them so Ops/Data leads get reports.
+  const leads = await Employee.selectWhere(
+    `id IN (SELECT lead_id FROM teams WHERE lead_id IS NOT NULL)
+     AND status = 'Active' AND email IS NOT NULL AND email <> ''`,
+    [],
+    'ORDER BY name ASC'
+  );
+
+  const byId = new Map();
+  for (const r of [...hr, ...managers, ...leads]) byId.set(r.id, r);
+  return Array.from(byId.values());
 }
 
 /**
  * Employees in scope for a recipient.
- * - Optional teamIds filter applied first
- * - HR Admin → all (filtered) active
- * - Team lead → their team members
- * - Manager → direct reports (fallback when not a lead / no team filter)
+ * - HR Admin (e.g. Hitesh) → entire organization (optional teamIds filter)
+ * - Manager / team lead (e.g. Ateeb, Irtaza) → direct reportees ∪ members of
+ *   teams they lead (so team assignment without manager_id still shows up)
  */
 async function scopedEmployees(recipient, teamIds) {
-  if (teamIds && teamIds.length) {
-    const employees = await Employee.findByTeamIds(teamIds);
-    if (recipient.fields.Role === ROLES.HR_ADMIN) return employees;
-
-    // Team lead: only members of teams they lead (intersected with filter).
-    const led = await Team.selectWhere('lead_id = $1', [recipient.id], '');
-    const ledIds = new Set(led.map((t) => t.id));
-    if (ledIds.size) {
-      return employees.filter((e) => {
-        const tid = (e.fields.Team && e.fields.Team[0]) || null;
-        return tid && ledIds.has(tid);
-      });
-    }
-    return Employee.findDirectReports(recipient.id).then((reps) =>
-      reps.filter((e) => {
-        const tid = (e.fields.Team && e.fields.Team[0]) || null;
-        return tid && teamIds.includes(tid);
-      })
-    );
-  }
-
   if (recipient.fields.Role === ROLES.HR_ADMIN) {
+    if (teamIds && teamIds.length) return Employee.findByTeamIds(teamIds);
     return Employee.selectWhere("status = 'Active'", [], 'ORDER BY name ASC');
   }
 
-  // Prefer team membership when this manager leads a team.
+  const reports = await Employee.findDirectReports(recipient.id);
   const led = await Team.selectWhere('lead_id = $1', [recipient.id], '');
+  let teamMembers = [];
   if (led.length) {
-    const ids = led.map((t) => t.id);
-    return Employee.findByTeamIds(ids);
+    teamMembers = await Employee.findByTeamIds(led.map((t) => t.id));
   }
-  return Employee.findDirectReports(recipient.id);
+
+  const byId = new Map();
+  for (const e of [...reports, ...teamMembers]) {
+    // Don't include the recipient themselves in their own report list.
+    if (e.id === recipient.id) continue;
+    byId.set(e.id, e);
+  }
+  let employees = Array.from(byId.values());
+
+  if (teamIds && teamIds.length) {
+    const allow = new Set(teamIds);
+    employees = employees.filter((e) => {
+      const tid = (e.fields.Team && e.fields.Team[0]) || null;
+      return tid && allow.has(tid);
+    });
+  }
+
+  employees.sort((a, b) =>
+    String(a.fields.Name || '').localeCompare(String(b.fields.Name || ''))
+  );
+  return employees;
 }
 
 function periodLabel(period, from, to) {
@@ -219,9 +313,157 @@ function groupRowsByTeam(rows, teams) {
   return out;
 }
 
+async function loadShiftById(employees) {
+  const ids = [
+    ...new Set(employees.map((e) => (e.fields.AssignedShift || [])[0]).filter(Boolean)),
+  ];
+  const map = new Map();
+  if (!ids.length) return map;
+  const shifts = await Shift.selectWhere('id = ANY($1::uuid[])', [ids], '');
+  for (const s of shifts) map.set(s.id, s);
+  return map;
+}
+
 /**
- * Send attendance report emails to Managers / team leads / HR Admin.
+ * Per-employee monthly insights from daily report rows + shift calendar.
+ * Expected hours = scheduled working days (shift days − holidays − leave) × shift length.
+ */
+function buildEmployeeMonthlyInsight(employee, empRows, { holidaySet, leaveSet, shift }) {
+  const workingDays = new Set(
+    shift && shift.fields.WorkingDays && shift.fields.WorkingDays.length
+      ? shift.fields.WorkingDays
+      : DEFAULT_WORKING_DAYS
+  );
+  const shiftHours = shiftLengthHours(shift);
+  const shiftMinutes = shiftHours == null ? null : Math.round(shiftHours * 60);
+
+  let expectedWorkingDays = 0;
+  for (const row of empRows) {
+    const d = row.date;
+    if (holidaySet.has(d)) continue;
+    if (leaveSet.has(d) || row.status === 'On Leave') continue;
+    if (!workingDays.has(dowForDateStr(d))) continue;
+    expectedWorkingDays += 1;
+  }
+
+  const expectedMinutes = shiftMinutes == null ? null : expectedWorkingDays * shiftMinutes;
+  const expectedHours = expectedMinutes == null ? null : round2(expectedMinutes / 60);
+
+  let workedMinutes = 0;
+  let overtimeHours = 0;
+  let lateMinutes = 0;
+  let onsiteDays = 0;
+  let remoteDays = 0;
+  let presentDays = 0;
+  let absentDays = 0;
+  let leaveDays = 0;
+  let holidayDays = 0;
+  let lateDays = 0;
+  let stillCheckedInDays = 0;
+  let noRecordDays = 0;
+
+  for (const row of empRows) {
+    if (row.workedMinutes != null) workedMinutes += Number(row.workedMinutes) || 0;
+    if (row.overtimeHours != null) overtimeHours += Number(row.overtimeHours) || 0;
+    if (row.isLate) {
+      lateDays += 1;
+      lateMinutes += Number(row.lateByMinutes) || 0;
+    }
+    if (row.mode === 'Office') onsiteDays += 1;
+    else if (row.mode === 'Remote') remoteDays += 1;
+
+    switch (row.status) {
+      case 'Present':
+        presentDays += 1;
+        break;
+      case 'Absent':
+        absentDays += 1;
+        break;
+      case 'On Leave':
+        leaveDays += 1;
+        break;
+      case 'Holiday':
+        holidayDays += 1;
+        break;
+      case 'Still checked in':
+        stillCheckedInDays += 1;
+        break;
+      case 'No record':
+        noRecordDays += 1;
+        break;
+      default:
+        break;
+    }
+  }
+
+  const workedHours = round2(workedMinutes / 60);
+  const varianceMinutes = expectedMinutes == null ? null : workedMinutes - expectedMinutes;
+  const varianceHours = varianceMinutes == null ? null : round2(varianceMinutes / 60);
+
+  return {
+    employeeId: employee.id,
+    employeeName: employee.fields.Name || null,
+    teamId: (employee.fields.Team && employee.fields.Team[0]) || null,
+    teamName: (empRows[0] && empRows[0].teamName) || null,
+    shiftLengthHours: shiftHours,
+    expectedWorkingDays,
+    expectedMinutes,
+    expectedHours,
+    expectedDuration: expectedMinutes == null ? null : formatHoursMinutes(expectedMinutes),
+    workedMinutes,
+    workedHours,
+    workedDuration: formatHoursMinutes(workedMinutes),
+    hoursVariance: varianceHours,
+    hoursVarianceMinutes: varianceMinutes,
+    hoursVarianceDuration:
+      varianceMinutes == null
+        ? null
+        : `${varianceMinutes >= 0 ? '+' : '−'}${formatHoursMinutes(Math.abs(varianceMinutes))}`,
+    onsiteDays,
+    remoteDays,
+    presentDays,
+    absentDays,
+    leaveDays,
+    holidayDays,
+    lateDays,
+    lateMinutes,
+    overtimeHours: round2(overtimeHours),
+    stillCheckedInDays,
+    noRecordDays,
+  };
+}
+
+/**
+ * Build monthly insights for a set of employees given already-built daily rows.
+ */
+function buildMonthlyInsights(employees, rows, { holidaySet, leaveByEmployee, shiftById }) {
+  const rowsByEmp = new Map();
+  for (const row of rows) {
+    if (!rowsByEmp.has(row.employeeId)) rowsByEmp.set(row.employeeId, []);
+    rowsByEmp.get(row.employeeId).push(row);
+  }
+
+  return employees
+    .map((emp) => {
+      const shiftId = (emp.fields.AssignedShift || [])[0] || null;
+      const shift = shiftId ? shiftById.get(shiftId) || null : null;
+      const leaveSet = leaveByEmployee.get(emp.id) || new Set();
+      const empRows = rowsByEmp.get(emp.id) || [];
+      return buildEmployeeMonthlyInsight(emp, empRows, { holidaySet, leaveSet, shift });
+    })
+    .sort((a, b) => {
+      const byTeam = String(a.teamName || '').localeCompare(String(b.teamName || ''));
+      if (byTeam !== 0) return byTeam;
+      return String(a.employeeName || '').localeCompare(String(b.employeeName || ''));
+    });
+}
+
+/**
+ * Send attendance report emails to Managers / HR Admin.
  * Also returns check-in/out rows (optionally filtered + grouped by team).
+ *
+ * Monthly reports include per-employee insights (worked vs expected hours,
+ * onsite/remote days, late/leave/absent counts).
  *
  * @param {'daily'|'weekly'|'monthly'} period
  * @param {{from?: string, to?: string, date?: string, force?: boolean, teamIds?: string[]}} opts
@@ -264,15 +506,65 @@ async function sendAttendanceReports(period, opts = {}) {
   const recipients = await reportRecipients(teamIds.length ? teamIds : null);
   const teamNameById = await loadTeamNameMap(teams.map((t) => t.id));
   const results = [];
+  const recipientReports = [];
 
-  // Build the full (filtered) dataset once for the API response.
+  // Org-wide (or team-filtered) dataset for the API response / HR view.
   const scopeEmployees = teamIds.length
     ? await Employee.findByTeamIds(teamIds)
     : await Employee.selectWhere("status = 'Active'", [], 'ORDER BY name ASC');
-  const allRows = await buildRows(scopeEmployees, from, to, teamNameById);
+  const leaveByEmployee = await loadApprovedLeaveByEmployee(
+    scopeEmployees.map((e) => e.id),
+    from,
+    to
+  );
+  const allRows = await buildRows(scopeEmployees, from, to, teamNameById, leaveByEmployee);
   const teamsPayload = groupRowsByTeam(allRows, teams);
 
+  const includeInsights = period === 'monthly';
+  let holidaySet = new Set();
+  let shiftById = new Map();
+  let allInsights = null;
+  if (includeInsights) {
+    holidaySet = await Holiday.dateSet(from, to);
+    shiftById = await loadShiftById(scopeEmployees);
+    allInsights = buildMonthlyInsights(scopeEmployees, allRows, {
+      holidaySet,
+      leaveByEmployee,
+      shiftById,
+    });
+  }
+
   for (const recipient of recipients) {
+    const employees = await scopedEmployees(recipient, teamIds.length ? teamIds : null);
+    const rows = employees.length
+      ? await buildRows(employees, from, to, teamNameById, leaveByEmployee)
+      : [];
+    const insights =
+      includeInsights && employees.length
+        ? buildMonthlyInsights(employees, rows, { holidaySet, leaveByEmployee, shiftById })
+        : null;
+
+    recipientReports.push({
+      recipientId: recipient.id,
+      name: recipient.fields.Name || null,
+      email: recipient.fields.Email || null,
+      role: recipient.fields.Role || null,
+      employeeCount: employees.length,
+      rowCount: rows.length,
+      rows,
+      insights,
+      teams: groupRowsByTeam(rows, teams),
+    });
+
+    if (!employees.length) {
+      results.push({
+        recipientId: recipient.id,
+        name: recipient.fields.Name || null,
+        skipped: 'no_employees',
+      });
+      continue;
+    }
+
     if (!opts.force) {
       const claimed = await claimReport({
         recipientId: recipient.id,
@@ -281,21 +573,22 @@ async function sendAttendanceReports(period, opts = {}) {
         periodKey: key,
       });
       if (!claimed) {
-        results.push({ recipientId: recipient.id, skipped: 'already_sent' });
+        results.push({
+          recipientId: recipient.id,
+          name: recipient.fields.Name || null,
+          skipped: 'already_sent',
+        });
         continue;
       }
     }
 
-    const employees = await scopedEmployees(recipient, teamIds.length ? teamIds : null);
-    if (!employees.length) {
-      results.push({ recipientId: recipient.id, skipped: 'no_employees' });
-      continue;
-    }
-
-    const rows = await buildRows(employees, from, to, teamNameById);
     const email = recipient.fields.Email;
     if (!email) {
-      results.push({ recipientId: recipient.id, skipped: 'no_email' });
+      results.push({
+        recipientId: recipient.id,
+        name: recipient.fields.Name || null,
+        skipped: 'no_email',
+      });
       continue;
     }
 
@@ -308,11 +601,14 @@ async function sendAttendanceReports(period, opts = {}) {
       to,
       subject: periodLabel(period, from, to),
       rows,
+      insights,
     });
 
     results.push({
       recipientId: recipient.id,
+      name: recipient.fields.Name || null,
       email,
+      role: recipient.fields.Role || null,
       employeeCount: employees.length,
       rowCount: rows.length,
       sent: true,
@@ -327,6 +623,8 @@ async function sendAttendanceReports(period, opts = {}) {
     teamIds: teamIds.length ? teamIds : null,
     teams: teamsPayload,
     rows: allRows,
+    insights: allInsights,
+    recipientReports,
     results,
   };
 }
@@ -334,6 +632,9 @@ async function sendAttendanceReports(period, opts = {}) {
 module.exports = {
   sendAttendanceReports,
   buildRows,
+  displayStatus,
+  buildEmployeeMonthlyInsight,
+  buildMonthlyInsights,
   weekBoundsPkt,
   monthBoundsPkt,
   periodLabel,

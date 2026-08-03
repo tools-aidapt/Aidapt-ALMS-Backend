@@ -14,9 +14,11 @@ const { badRequest, conflict, notFound, forbidden } = require('../middleware/err
 
 function serialize(rec) {
   const f = rec.fields;
+  const employee = f.Employee || [];
   return {
     id: rec.id,
-    employee: f.Employee || [],
+    employee,
+    employeeId: employee[0] || null,
     date: f.Date || null,
     requestedCheckInTime: f.RequestedCheckInTime || null,
     requestedCheckOutTime: f.RequestedCheckOutTime || null,

@@ -1,0 +1,438 @@
+{
+  "name": "AIMS — Attendance Report → Outlook + ClickUp",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3995614c53330b8235732b6439f4722022fa77b84f9cd17e44c49abe50c94c1f",
+    "description": "Cron AIMS attendance-report, email scoped HTML via Outlook, post markdown to ClickUp Chat channel."
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Karachi"
+  },
+  "active": false,
+  "pinData": {},
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "45 23 * * *"
+            }
+          ]
+        }
+      },
+      "id": "35fcf499-3160-4f94-89d5-2c9aa877250c",
+      "name": "Cron Daily 23:45 PKT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -176,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "574e2a97-a84f-441c-954f-660f1c4635b2",
+      "name": "Cron Weekly Mon 08:00 PKT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -176,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "15 8 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "c1d9a74b-629d-4226-8337-64563c6b39f1",
+      "name": "Cron Monthly 1st 08:15 PKT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -176,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p1",
+              "name": "period",
+              "value": "daily",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "897e4aef-1ef1-4490-9303-f01f0e1b3845",
+      "name": "Period = daily",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        96,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p2",
+              "name": "period",
+              "value": "weekly",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "001b9639-d929-41a6-b56f-4a772a24537f",
+      "name": "Period = weekly",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        96,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p3",
+              "name": "period",
+              "value": "monthly",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6c42ad74-f0fa-4fbb-8c62-564bce2475f3",
+      "name": "Period = monthly",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        96,
+        464
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "17798020-dc37-48fa-829d-23c2de0cddd3",
+      "name": "Manual Test (daily)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p4",
+              "name": "period",
+              "value": "daily",
+              "type": "string"
+            },
+            {
+              "id": "p5",
+              "name": "force",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e6394a9e-0cdf-412b-8524-dcc958d79b27",
+      "name": "Period = daily (manual)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        96,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aidapt-alms-backend-3was.onrender.com/api/jobs/attendance-report",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Job-Secret",
+              "value": "1a2b3c4d5e6f7g8h9i0j"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ period: $json.period, force: $json.force === true }) }}",
+        "options": {
+          "response": {
+            "response": {}
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "af8641c7-5dd2-4ba2-a230-34a3aa1f7dff",
+      "name": "Call AIMS attendance-report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        352,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = items[0].json;\nconst data = payload.data || payload;\nconst period = data.period || 'daily';\nconst from = data.from;\nconst to = data.to;\nconst allRows = Array.isArray(data.rows) ? data.rows : [];\nconst allInsights = Array.isArray(data.insights) ? data.insights : [];\nconst recipientReports = Array.isArray(data.recipientReports) ? data.recipientReports : [];\n\n// Aidapt brand tokens\nconst brand = {\n  navy: '#07111F',\n  teal: '#14B8A6',\n  tealDark: '#0F766E',\n  ink: '#0B1220',\n  muted: '#5B6575',\n  line: '#E6E9EF',\n  surface: '#F7F8FA',\n  white: '#FFFFFF',\n  late: '#B45309',\n  absent: '#B91C1C',\n};\n\nfunction esc(s) {\n  return String(s ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n}\n\nfunction mdCell(s) {\n  return String(s ?? '—').replace(/\\|/g, '\\\\|').replace(/\\n/g, ' ');\n}\n\nfunction norm(s) {\n  return String(s || '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction findReport(matchers) {\n  return (\n    recipientReports.find((r) => {\n      const n = norm(r.name);\n      return matchers.some((m) => n.includes(m));\n    }) || null\n  );\n}\n\nfunction filterByTeamHints(rows, teamHints) {\n  if (!teamHints.length) return rows || [];\n  return (rows || []).filter((r) =>\n    teamHints.some((h) => norm(r.teamName || '').includes(h))\n  );\n}\n\nconst th = `padding:10px 12px;border-bottom:1px solid ${brand.line};text-align:left;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:${brand.muted};font-weight:600;background:${brand.surface}`;\nconst td = `padding:10px 12px;border-bottom:1px solid ${brand.line};font-size:13px;color:${brand.ink};vertical-align:top`;\nconst tdCenter = `${td};text-align:center`;\n\nfunction buildDailyHtml(rows) {\n  return (rows || [])\n    .map((r) => {\n      const checkOut =\n        r.status === 'Still checked in'\n          ? 'Still checked in'\n          : r.status === 'On Leave'\n            ? '—'\n            : r.checkOutTime || '—';\n      const checkIn = r.status === 'On Leave' ? '—' : r.checkInTime || '—';\n      const statusLabel = `${r.status || ''}${r.isLate ? ' (Late)' : ''}`;\n      const statusColor =\n        r.status === 'Absent'\n          ? brand.absent\n          : r.status === 'On Leave'\n            ? brand.tealDark\n            : r.status === 'Still checked in'\n              ? brand.late\n              : r.isLate\n                ? brand.late\n                : brand.ink;\n      return `<tr>\n  <td style=\"${td}\">${esc(r.teamName || '—')}</td>\n  <td style=\"${td}\"><strong>${esc(r.employeeName || '')}</strong></td>\n  <td style=\"${td}\">${esc(r.date)}</td>\n  <td style=\"${td}\">${esc(checkIn)}</td>\n  <td style=\"${td}\">${esc(checkOut)}</td>\n  <td style=\"${td};color:${statusColor}\">${esc(statusLabel)}</td>\n  <td style=\"${td}\">${esc(r.mode || '—')}</td>\n  <td style=\"${td}\">${esc(r.workedDuration || '—')}</td>\n</tr>`;\n    })\n    .join('');\n}\n\nfunction buildInsightsHtml(insights) {\n  if (!insights || !insights.length) return '';\n  const body = insights\n    .map(\n      (i) => `<tr>\n  <td style=\"${td}\">${esc(i.teamName || '—')}</td>\n  <td style=\"${td}\"><strong>${esc(i.employeeName || '')}</strong></td>\n  <td style=\"${td}\">${esc(i.workedDuration || '—')}</td>\n  <td style=\"${td}\">${esc(i.expectedDuration || '—')}</td>\n  <td style=\"${td}\">${esc(i.hoursVarianceDuration || '—')}</td>\n  <td style=\"${tdCenter}\">${i.onsiteDays}</td>\n  <td style=\"${tdCenter}\">${i.remoteDays}</td>\n  <td style=\"${tdCenter}\">${i.presentDays}</td>\n  <td style=\"${tdCenter}\">${i.absentDays}</td>\n  <td style=\"${tdCenter}\">${i.leaveDays}</td>\n  <td style=\"${tdCenter}\">${i.lateDays}</td>\n</tr>`\n    )\n    .join('');\n  return `\n<div style=\"margin:0 0 28px\">\n  <h2 style=\"margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600\">Monthly insights</h2>\n  <p style=\"margin:0 0 14px;color:${brand.muted};font-size:13px\">\n    Worked vs expected (shift days − holidays − leave). Onsite = Office · Remote = Remote In.\n  </p>\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden\">\n    <thead>\n      <tr>\n        <th style=\"${th}\">Team</th>\n        <th style=\"${th}\">Employee</th>\n        <th style=\"${th}\">Worked</th>\n        <th style=\"${th}\">Expected</th>\n        <th style=\"${th}\">Variance</th>\n        <th style=\"${th}\">Onsite</th>\n        <th style=\"${th}\">Remote</th>\n        <th style=\"${th}\">Present</th>\n        <th style=\"${th}\">Absent</th>\n        <th style=\"${th}\">Leave</th>\n        <th style=\"${th}\">Late</th>\n      </tr>\n    </thead>\n    <tbody>${body}</tbody>\n  </table>\n</div>`;\n}\n\nfunction buildEmailHtml({ toName, roleLabel, rows, insights }) {\n  const rangeLabel = from === to ? from : `${from} → ${to}`;\n  const periodTitle =\n    period === 'daily' ? 'Daily' : period === 'weekly' ? 'Weekly' : 'Monthly';\n  const insightsHtml = period === 'monthly' ? buildInsightsHtml(insights || []) : '';\n  const daily = buildDailyHtml(rows);\n  const emptyDaily = `<tr>\n  <td colspan=\"8\" style=\"padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px\">\n    No attendance rows in this view. Ensure your team members are assigned under your team in AIMS.\n  </td>\n</tr>`;\n\n  return `<!DOCTYPE html>\n<html lang=\"en\">\n<body style=\"margin:0;padding:0;background:${brand.surface};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${brand.surface};padding:24px 12px\">\n    <tr>\n      <td align=\"center\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:880px;background:${brand.white};border:1px solid ${brand.line};border-radius:12px;overflow:hidden\">\n          <tr>\n            <td style=\"background:${brand.navy};padding:22px 28px\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td>\n                    <div style=\"font-size:20px;font-weight:700;color:${brand.white};letter-spacing:-0.02em\">\n                      Aidapt<span style=\"color:${brand.teal}\">.</span>\n                    </div>\n                    <div style=\"margin-top:4px;font-size:12px;color:rgba(255,255,255,0.65);letter-spacing:0.06em;text-transform:uppercase\">\n                      Attendance &amp; Leave · ALMS\n                    </div>\n                  </td>\n                  <td align=\"right\" style=\"color:${brand.teal};font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase\">\n                    ${esc(periodTitle)} report\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"height:3px;background:${brand.teal};font-size:0;line-height:0\">&nbsp;</td>\n          </tr>\n          <tr>\n            <td style=\"padding:28px\">\n              <p style=\"margin:0 0 8px;font-size:15px;color:${brand.ink}\">Hi ${esc(toName)},</p>\n              <p style=\"margin:0 0 22px;font-size:14px;color:${brand.muted};line-height:1.55\">\n                Here is your <strong style=\"color:${brand.ink}\">${esc(period)}</strong> attendance report for\n                <strong style=\"color:${brand.ink}\">${esc(rangeLabel)}</strong>\n                <span style=\"color:${brand.teal}\"> · ${esc(roleLabel)} view</span>.\n              </p>\n              ${insightsHtml}\n              <div>\n                <h2 style=\"margin:0 0 14px;font-size:16px;color:${brand.ink};font-weight:600\">Daily detail</h2>\n                <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden\">\n                  <thead>\n                    <tr>\n                      <th style=\"${th}\">Team</th>\n                      <th style=\"${th}\">Employee</th>\n                      <th style=\"${th}\">Date</th>\n                      <th style=\"${th}\">Check-in</th>\n                      <th style=\"${th}\">Check-out</th>\n                      <th style=\"${th}\">Status</th>\n                      <th style=\"${th}\">Mode</th>\n                      <th style=\"${th}\">Worked</th>\n                    </tr>\n                  </thead>\n                  <tbody>\n                    ${daily || emptyDaily}\n                  </tbody>\n                </table>\n                <p style=\"margin:14px 0 0;color:${brand.muted};font-size:12px\">\n                  ${(rows || []).length} row${(rows || []).length === 1 ? '' : 's'}\n                </p>\n              </div>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"padding:16px 28px;background:${brand.surface};border-top:1px solid ${brand.line}\">\n              <p style=\"margin:0;font-size:11px;color:${brand.muted};line-height:1.5\">\n                Sent by Aidapt ALMS · The operator’s AI firm ·\n                <a href=\"https://aidapt.co\" style=\"color:${brand.tealDark};text-decoration:none\">aidapt.co</a>\n              </p>\n            </td>\n          </tr>\n        </table>\n      </td>\n    </tr>\n  </table>\n</body>\n</html>`;\n}\n\nfunction buildInsightsMarkdown(insights) {\n  if (!insights || !insights.length) return '';\n  const lines = [\n    '### Monthly insights',\n    '',\n    '| Team | Employee | Worked | Expected | Variance | Onsite | Remote | Present | Absent | Leave | Late |',\n    '| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',\n  ];\n  for (const i of insights) {\n    lines.push(\n      `| ${mdCell(i.teamName)} | ${mdCell(i.employeeName)} | ${mdCell(i.workedDuration)} | ${mdCell(i.expectedDuration)} | ${mdCell(i.hoursVarianceDuration)} | ${i.onsiteDays} | ${i.remoteDays} | ${i.presentDays} | ${i.absentDays} | ${i.leaveDays} | ${i.lateDays} |`\n    );\n  }\n  lines.push('');\n  return lines.join('\\n');\n}\n\nfunction buildDailyMarkdown(rows) {\n  const lines = [\n    '### Daily detail',\n    '',\n    '| Team | Employee | Date | In | Out | Status | Mode | Worked |',\n    '| --- | --- | --- | --- | --- | --- | --- | --- |',\n  ];\n  for (const r of rows || []) {\n    const checkOut =\n      r.status === 'Still checked in'\n        ? 'Still checked in'\n        : r.status === 'On Leave'\n          ? '—'\n          : r.checkOutTime || '—';\n    const checkIn = r.status === 'On Leave' ? '—' : r.checkInTime || '—';\n    const status = `${r.status || ''}${r.isLate ? ' (Late)' : ''}`;\n    lines.push(\n      `| ${mdCell(r.teamName)} | ${mdCell(r.employeeName)} | ${mdCell(r.date)} | ${mdCell(checkIn)} | ${mdCell(checkOut)} | ${mdCell(status)} | ${mdCell(r.mode)} | ${mdCell(r.workedDuration)} |`\n    );\n  }\n  lines.push('');\n  return lines.join('\\n');\n}\n\nfunction buildClickUpMarkdown({ rows, insights }) {\n  const rangeLabel = from === to ? from : `${from} → ${to}`;\n  const title =\n    period === 'daily'\n      ? `Daily attendance — ${from}`\n      : period === 'weekly'\n        ? `Weekly attendance — ${from} → ${to}`\n        : `Monthly attendance — ${from} → ${to}`;\n\n  const MAX_DAILY_ROWS = 80;\n  const clipped = (rows || []).slice(0, MAX_DAILY_ROWS);\n  const more =\n    (rows || []).length > MAX_DAILY_ROWS\n      ? `\\n_…and ${(rows || []).length - MAX_DAILY_ROWS} more rows (see email for full detail)._\\n`\n      : '';\n\n  const parts = [\n    `## ${title}`,\n    '',\n    `Period: **${rangeLabel}** · Employees in view: **${new Set((rows || []).map((r) => r.employeeId)).size}** · Rows: **${(rows || []).length}**`,\n    '',\n  ];\n  if (period === 'monthly') parts.push(buildInsightsMarkdown(insights || []));\n  parts.push(buildDailyMarkdown(clipped));\n  if (more) parts.push(more);\n  parts.push('_Sent by Aidapt ALMS_');\n  return parts.join('\\n');\n}\n\nconst rangeLabel = from === to ? from : `${from} → ${to}`;\nconst subject =\n  period === 'daily'\n    ? `Daily attendance — ${from}`\n    : period === 'weekly'\n      ? `Weekly attendance — ${from} → ${to}`\n      : `Monthly attendance — ${from} → ${to}`;\n\nconst targets = [\n  {\n    label: 'Muhammad Ateeb',\n    matchers: ['ateeb'],\n    emailFallback: 'm.ateeb@aidapt.co',\n    scope: 'reportees',\n    teamHints: ['operations'],\n  },\n  {\n    label: 'Muhammad Irtaza',\n    matchers: ['irtaza'],\n    emailFallback: 's.irtaza@aidapt.co',\n    scope: 'reportees',\n    teamHints: ['data'],\n  },\n  {\n    label: 'Hitesh Mahajan',\n    matchers: ['hitesh'],\n    emailFallback: 'REPLACE_HITESH@aidapt.co',\n    scope: 'organization',\n    teamHints: [],\n  },\n];\n\nconst emails = targets.map((t) => {\n  const report = findReport(t.matchers);\n  let rows;\n  let insights;\n  let roleLabel;\n  if (t.scope === 'organization') {\n    rows = report && report.role === 'HR Admin' ? report.rows : allRows;\n    insights = report && report.role === 'HR Admin' ? report.insights : allInsights;\n    roleLabel = 'organization';\n  } else {\n    rows = report ? report.rows || [] : [];\n    insights = report ? report.insights || [] : [];\n    roleLabel = 'team';\n    // Safety net if API scope is empty (e.g. manager_id not set yet): filter by team name.\n    if (!rows.length && t.teamHints && t.teamHints.length) {\n      rows = filterByTeamHints(allRows, t.teamHints);\n      insights = filterByTeamHints(allInsights, t.teamHints);\n    }\n  }\n  const toEmail =\n    report && report.email && !String(report.email).startsWith('REPLACE_')\n      ? report.email\n      : t.emailFallback;\n  const toName = (report && report.name) || t.label;\n  return {\n    channel: 'email',\n    to: toEmail,\n    toName,\n    subject,\n    html: buildEmailHtml({ toName, roleLabel, rows, insights }),\n    period,\n    from,\n    toDate: to,\n    rowCount: (rows || []).length,\n    scope: roleLabel,\n  };\n});\n\nconst clickupMarkdown = buildClickUpMarkdown({\n  rows: allRows,\n  insights: allInsights,\n});\n\nreturn [\n  {\n    json: {\n      period,\n      from,\n      to,\n      subject,\n      rangeLabel,\n      emails,\n      clickupMarkdown,\n      clickupTitle: subject,\n    },\n  },\n];\n"
+      },
+      "id": "57153e1d-8a4c-4dd6-8f91-e297b893d283",
+      "name": "Format email + ClickUp markdown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "emails",
+        "options": {}
+      },
+      "id": "split-emails-001",
+      "name": "Split Out emails",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        832,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "={{ $json.html }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "id": "1c9dcd65-55e7-4906-a5de-05ca976a75c7",
+      "name": "Send via Outlook",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        208
+      ],
+      "webhookId": "bb46f75e-ebca-42ff-acd4-c2070fa0ba46",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "m9WTLZOWpRKaVwEa",
+          "name": "Sofi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.clickup.com/api/v3/workspaces/{{ $env.CLICKUP_WORKSPACE_ID }}/chat/channels/{{ $env.CLICKUP_CHANNEL_ID }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $env.CLICKUP_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'message', content_format: 'text/md', content: $json.clickupMarkdown }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "post-clickup-001",
+      "name": "Post markdown to ClickUp Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        832,
+        448
+      ]
+    }
+  ],
+  "connections": {
+    "Cron Daily 23:45 PKT": {
+      "main": [
+        [
+          {
+            "node": "Period = daily",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Weekly Mon 08:00 PKT": {
+      "main": [
+        [
+          {
+            "node": "Period = weekly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Monthly 1st 08:15 PKT": {
+      "main": [
+        [
+          {
+            "node": "Period = monthly",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test (daily)": {
+      "main": [
+        [
+          {
+            "node": "Period = daily (manual)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Period = daily": {
+      "main": [
+        [
+          {
+            "node": "Call AIMS attendance-report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Period = weekly": {
+      "main": [
+        [
+          {
+            "node": "Call AIMS attendance-report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Period = monthly": {
+      "main": [
+        [
+          {
+            "node": "Call AIMS attendance-report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Period = daily (manual)": {
+      "main": [
+        [
+          {
+            "node": "Call AIMS attendance-report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call AIMS attendance-report": {
+      "main": [
+        [
+          {
+            "node": "Format email + ClickUp markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format email + ClickUp markdown": {
+      "main": [
+        [
+          {
+            "node": "Split Out emails",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Post markdown to ClickUp Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out emails": {
+      "main": [
+        [
+          {
+            "node": "Send via Outlook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
