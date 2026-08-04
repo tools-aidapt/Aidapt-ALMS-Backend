@@ -5,14 +5,18 @@ const Team = require('../models/Team');
 const Shift = require('../models/Shift');
 const Holiday = require('../models/Holiday');
 const AttendancePunch = require('../models/AttendancePunch');
+const LeaveBalance = require('../models/LeaveBalance');
+const EmployeeMonthlyStrike = require('../models/EmployeeMonthlyStrike');
 const { claimReport } = require('../models/AttendanceNotificationLog');
 const emailService = require('./emailService');
+const monthlyReportPdfService = require('./monthlyReportPdfService');
 const { query } = require('../config/db');
 const {
   todayPktDateStr,
   dateRangeInclusive,
   formatHoursMinutes,
   pktHm,
+  parseHhMm,
   dowForDateStr,
   round2,
 } = require('../utils/dateUtils');
@@ -20,6 +24,8 @@ const { shiftLengthHours } = require('../utils/attendanceCalc');
 const { ROLES } = require('../middleware/auth');
 
 const DEFAULT_WORKING_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+/** Standard probation length used when employment_status is Probation (no stored end date). */
+const PROBATION_MONTHS = 3;
 
 function pad(n) {
   return String(n).padStart(2, '0');
@@ -85,33 +91,174 @@ function rowFromPunch(employee, punch, dateStr, teamName = null, onLeave = false
 }
 
 /**
+ * Empty leave-meta shell for one employee (types + request list).
+ */
+function emptyLeaveMeta() {
+  return {
+    taken: { annual: 0, sick: 0, casual: 0 },
+    items: [],
+  };
+}
+
+/**
  * Map employeeId → Set of YYYY-MM-DD dates covered by approved leave in [from, to].
+ * Also returns per-employee leave taken breakdown for the period.
  */
 async function loadApprovedLeaveByEmployee(employeeIds, from, to) {
   const map = new Map();
-  if (!employeeIds || !employeeIds.length) return map;
+  const metaByEmployee = new Map();
+  if (!employeeIds || !employeeIds.length) {
+    return { leaveByEmployee: map, leaveMetaByEmployee: metaByEmployee };
+  }
 
   const { rows } = await query(
-    `SELECT employee_id, from_date, to_date
+    `SELECT employee_id, leave_type, from_date, to_date, days
        FROM leave_requests
       WHERE status = 'Approved'
         AND employee_id = ANY($1::uuid[])
         AND from_date <= $3::date
-        AND to_date >= $2::date`,
+        AND to_date >= $2::date
+      ORDER BY from_date ASC`,
     [employeeIds, from, to]
   );
 
   for (const lr of rows) {
     const empId = lr.employee_id;
     if (!map.has(empId)) map.set(empId, new Set());
+    if (!metaByEmployee.has(empId)) metaByEmployee.set(empId, emptyLeaveMeta());
     const set = map.get(empId);
+    const meta = metaByEmployee.get(empId);
     const leaveFrom = String(lr.from_date).slice(0, 10);
     const leaveTo = String(lr.to_date).slice(0, 10);
+    const type = lr.leave_type || null;
+    const datesInPeriod = [];
     for (const d of dateRangeInclusive(leaveFrom, leaveTo)) {
-      if (d >= from && d <= to) set.add(d);
+      if (d >= from && d <= to) {
+        set.add(d);
+        datesInPeriod.push(d);
+      }
     }
+    const daysInPeriod = datesInPeriod.length;
+    if (type === 'Annual') meta.taken.annual += daysInPeriod;
+    else if (type === 'Sick') meta.taken.sick += daysInPeriod;
+    else if (type === 'Casual') meta.taken.casual += daysInPeriod;
+
+    meta.items.push({
+      leaveType: type,
+      fromDate: leaveFrom,
+      toDate: leaveTo,
+      endsOn: leaveTo,
+      daysInPeriod,
+      totalDays: lr.days != null ? Number(lr.days) : daysInPeriod,
+    });
+  }
+  return { leaveByEmployee: map, leaveMetaByEmployee: metaByEmployee };
+}
+
+/** Batch leave balances: employeeId → { annual, sick, casual }. */
+async function loadLeaveBalancesByEmployee(employeeIds) {
+  const map = new Map();
+  if (!employeeIds || !employeeIds.length) return map;
+  const rows = await LeaveBalance.selectWhere(
+    'employee_id = ANY($1::uuid[])',
+    [employeeIds],
+    ''
+  );
+  for (const bal of rows) {
+    const eid = (bal.fields.Employee && bal.fields.Employee[0]) || null;
+    if (!eid) continue;
+    map.set(eid, {
+      annual: Number(bal.fields.Annual || 0),
+      sick: Number(bal.fields.Sick || 0),
+      casual: Number(bal.fields.Casual || 0),
+    });
   }
   return map;
+}
+
+/** Batch monthly strike snapshots: employeeId → { lateCount, strikeCount, items }. */
+async function loadMonthlyStrikesByEmployee(employeeIds, yearMonth) {
+  const map = new Map();
+  if (!employeeIds || !employeeIds.length || !yearMonth) return map;
+  const rows = await EmployeeMonthlyStrike.selectWhere(
+    'year_month = $1 AND employee_id = ANY($2::uuid[])',
+    [yearMonth, employeeIds],
+    ''
+  );
+  for (const rec of rows) {
+    const eid = (rec.fields.Employee && rec.fields.Employee[0]) || null;
+    if (!eid) continue;
+    const items = Array.isArray(rec.fields.StrikeItems) ? rec.fields.StrikeItems : [];
+    map.set(eid, {
+      lateCount: Number(rec.fields.LateCount ?? 0),
+      strikeCount: Number(rec.fields.StrikeCount ?? 0),
+      items: items.map((item) => ({
+        date: item && item.date ? String(item.date).slice(0, 10) : null,
+        reason: item && item.reason ? String(item.reason) : null,
+        checkInTimePkt: item && item.checkInTimePkt ? item.checkInTimePkt : null,
+      })),
+    });
+  }
+  return map;
+}
+
+/** Add calendar months to a YYYY-MM-DD date (day clamped to month length). */
+function addCalendarMonths(dateStr, months) {
+  if (!dateStr) return null;
+  const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const target = new Date(Date.UTC(y, m - 1 + months, 1));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  const day = Math.min(d, lastDay);
+  return `${target.getUTCFullYear()}-${pad(target.getUTCMonth() + 1)}-${pad(day)}`;
+}
+
+/** Probation flag + estimated end (DOJ + PROBATION_MONTHS). */
+function probationFromEmployee(employee) {
+  const status = employee.fields.EmploymentStatus || 'Full-time';
+  const onProbation = status === 'Probation';
+  const dateOfJoining = employee.fields.DateOfJoining
+    ? String(employee.fields.DateOfJoining).slice(0, 10)
+    : null;
+  const probationEndsOn =
+    onProbation && dateOfJoining ? addCalendarMonths(dateOfJoining, PROBATION_MONTHS) : null;
+  return {
+    employmentStatus: status,
+    onProbation,
+    dateOfJoining,
+    probationEndsOn,
+  };
+}
+
+/** Average "HH:mm" from a list of time-of-day strings; null if none. */
+function averageHm(times) {
+  const mins = [];
+  for (const t of times || []) {
+    const m = parseHhMm(t);
+    if (m != null) mins.push(m);
+  }
+  if (!mins.length) return null;
+  const avg = Math.round(mins.reduce((a, b) => a + b, 0) / mins.length);
+  const h = Math.floor(avg / 60) % 24;
+  const m = avg % 60;
+  return `${pad(h)}:${pad(m)}`;
+}
+
+/** Human leave-taken label e.g. "Annual 2, Sick 1". */
+function formatLeaveTaken(taken) {
+  const parts = [];
+  if (taken.annual) parts.push(`Annual ${taken.annual}`);
+  if (taken.sick) parts.push(`Sick ${taken.sick}`);
+  if (taken.casual) parts.push(`Casual ${taken.casual}`);
+  return parts.length ? parts.join(', ') : 'None';
+}
+
+/** Human balance label e.g. "Annual 10 · Sick 5 · Casual 2". */
+function formatLeaveBalances(balances) {
+  const b = balances || { annual: 0, sick: 0, casual: 0 };
+  return `Annual ${b.annual} · Sick ${b.sick} · Casual ${b.casual}`;
 }
 
 /**
@@ -120,13 +267,15 @@ async function loadApprovedLeaveByEmployee(employeeIds, from, to) {
  */
 async function buildRows(employees, from, to, teamNameById = new Map(), leaveByEmployee = null) {
   const dates = dateRangeInclusive(from, to);
-  const leaveMap =
-    leaveByEmployee ||
-    (await loadApprovedLeaveByEmployee(
+  let leaveMap = leaveByEmployee;
+  if (!leaveMap) {
+    const loaded = await loadApprovedLeaveByEmployee(
       employees.map((e) => e.id),
       from,
       to
-    ));
+    );
+    leaveMap = loaded.leaveByEmployee;
+  }
   const rows = [];
   for (const emp of employees) {
     const punches = await AttendancePunch.query({
@@ -326,9 +475,28 @@ async function loadShiftById(employees) {
 
 /**
  * Per-employee monthly insights from daily report rows + shift calendar.
- * Expected hours = scheduled working days (shift days − holidays − leave) × shift length.
+ * Expected days/hours = scheduled working days (shift days − holidays − leave) × shift length.
+ *
+ * @param {object} employee
+ * @param {Array<object>} empRows
+ * @param {{
+ *   holidaySet: Set<string>,
+ *   leaveSet: Set<string>,
+ *   shift: object|null,
+ *   leaveMeta?: object,
+ *   leaveBalances?: {annual:number,sick:number,casual:number}|null,
+ *   strikeInfo?: {lateCount:number,strikeCount:number,items:Array}|null,
+ * }} opts
  */
-function buildEmployeeMonthlyInsight(employee, empRows, { holidaySet, leaveSet, shift }) {
+function buildEmployeeMonthlyInsight(employee, empRows, opts) {
+  const {
+    holidaySet,
+    leaveSet,
+    shift,
+    leaveMeta = emptyLeaveMeta(),
+    leaveBalances = null,
+    strikeInfo = null,
+  } = opts;
   const workingDays = new Set(
     shift && shift.fields.WorkingDays && shift.fields.WorkingDays.length
       ? shift.fields.WorkingDays
@@ -361,6 +529,8 @@ function buildEmployeeMonthlyInsight(employee, empRows, { holidaySet, leaveSet, 
   let lateDays = 0;
   let stillCheckedInDays = 0;
   let noRecordDays = 0;
+  const checkInTimes = [];
+  const checkOutTimes = [];
 
   for (const row of empRows) {
     if (row.workedMinutes != null) workedMinutes += Number(row.workedMinutes) || 0;
@@ -371,6 +541,9 @@ function buildEmployeeMonthlyInsight(employee, empRows, { holidaySet, leaveSet, 
     }
     if (row.mode === 'Office') onsiteDays += 1;
     else if (row.mode === 'Remote') remoteDays += 1;
+
+    if (row.checkInTime) checkInTimes.push(row.checkInTime);
+    if (row.checkOutTime) checkOutTimes.push(row.checkOutTime);
 
     switch (row.status) {
       case 'Present':
@@ -399,6 +572,19 @@ function buildEmployeeMonthlyInsight(employee, empRows, { holidaySet, leaveSet, 
   const workedHours = round2(workedMinutes / 60);
   const varianceMinutes = expectedMinutes == null ? null : workedMinutes - expectedMinutes;
   const varianceHours = varianceMinutes == null ? null : round2(varianceMinutes / 60);
+  // Days the employee actually showed up (present or still checked in).
+  const workedDays = presentDays + stillCheckedInDays;
+  const avgCheckInTime = averageHm(checkInTimes);
+  const avgCheckOutTime = averageHm(checkOutTimes);
+  const probation = probationFromEmployee(employee);
+  const balances = leaveBalances || { annual: 0, sick: 0, casual: 0 };
+  const taken = leaveMeta.taken || { annual: 0, sick: 0, casual: 0 };
+  const strikeCount = strikeInfo
+    ? Number(strikeInfo.strikeCount || 0)
+    : 0;
+  // Prefer stored strike lateCount when present; else fall back to row-derived lateDays.
+  const lateCount =
+    strikeInfo && strikeInfo.lateCount != null ? Number(strikeInfo.lateCount) : lateDays;
 
   return {
     employeeId: employee.id,
@@ -406,7 +592,20 @@ function buildEmployeeMonthlyInsight(employee, empRows, { holidaySet, leaveSet, 
     teamId: (employee.fields.Team && employee.fields.Team[0]) || null,
     teamName: (empRows[0] && empRows[0].teamName) || null,
     shiftLengthHours: shiftHours,
+    // Days-focused (primary for monthly manager review)
+    workedDays,
     expectedWorkingDays,
+    presentDays,
+    absentDays,
+    leaveDays,
+    holidayDays,
+    lateDays: lateCount,
+    lateCount,
+    strikeCount,
+    strikeItems: strikeInfo && Array.isArray(strikeInfo.items) ? strikeInfo.items : [],
+    avgCheckInTime,
+    avgCheckOutTime,
+    // Hours (kept for variance / deeper review)
     expectedMinutes,
     expectedHours,
     expectedDuration: expectedMinutes == null ? null : formatHoursMinutes(expectedMinutes),
@@ -421,22 +620,32 @@ function buildEmployeeMonthlyInsight(employee, empRows, { holidaySet, leaveSet, 
         : `${varianceMinutes >= 0 ? '+' : '−'}${formatHoursMinutes(Math.abs(varianceMinutes))}`,
     onsiteDays,
     remoteDays,
-    presentDays,
-    absentDays,
-    leaveDays,
-    holidayDays,
-    lateDays,
     lateMinutes,
     overtimeHours: round2(overtimeHours),
     stillCheckedInDays,
     noRecordDays,
+    // Probation
+    employmentStatus: probation.employmentStatus,
+    onProbation: probation.onProbation,
+    dateOfJoining: probation.dateOfJoining,
+    probationEndsOn: probation.probationEndsOn,
+    // Leave taken this period + remaining balances
+    leaveTaken: taken,
+    leaveTakenLabel: formatLeaveTaken(taken),
+    leaveItems: leaveMeta.items || [],
+    leaveBalances: balances,
+    leaveBalancesLabel: formatLeaveBalances(balances),
   };
 }
 
 /**
  * Build monthly insights for a set of employees given already-built daily rows.
  */
-function buildMonthlyInsights(employees, rows, { holidaySet, leaveByEmployee, shiftById }) {
+function buildMonthlyInsights(
+  employees,
+  rows,
+  { holidaySet, leaveByEmployee, shiftById, leaveMetaByEmployee, balanceByEmployee, strikeByEmployee }
+) {
   const rowsByEmp = new Map();
   for (const row of rows) {
     if (!rowsByEmp.has(row.employeeId)) rowsByEmp.set(row.employeeId, []);
@@ -449,7 +658,14 @@ function buildMonthlyInsights(employees, rows, { holidaySet, leaveByEmployee, sh
       const shift = shiftId ? shiftById.get(shiftId) || null : null;
       const leaveSet = leaveByEmployee.get(emp.id) || new Set();
       const empRows = rowsByEmp.get(emp.id) || [];
-      return buildEmployeeMonthlyInsight(emp, empRows, { holidaySet, leaveSet, shift });
+      return buildEmployeeMonthlyInsight(emp, empRows, {
+        holidaySet,
+        leaveSet,
+        shift,
+        leaveMeta: (leaveMetaByEmployee && leaveMetaByEmployee.get(emp.id)) || emptyLeaveMeta(),
+        leaveBalances: (balanceByEmployee && balanceByEmployee.get(emp.id)) || null,
+        strikeInfo: (strikeByEmployee && strikeByEmployee.get(emp.id)) || null,
+      });
     })
     .sort((a, b) => {
       const byTeam = String(a.teamName || '').localeCompare(String(b.teamName || ''));
@@ -462,8 +678,8 @@ function buildMonthlyInsights(employees, rows, { holidaySet, leaveByEmployee, sh
  * Send attendance report emails to Managers / HR Admin.
  * Also returns check-in/out rows (optionally filtered + grouped by team).
  *
- * Monthly reports include per-employee insights (worked vs expected hours,
- * onsite/remote days, late/leave/absent counts).
+ * Monthly reports include per-employee insights (worked vs expected days,
+ * leave taken/balances, avg check-in/out, late/strike counts, probation).
  *
  * @param {'daily'|'weekly'|'monthly'} period
  * @param {{from?: string, to?: string, date?: string, force?: boolean, teamIds?: string[]}} opts
@@ -512,8 +728,9 @@ async function sendAttendanceReports(period, opts = {}) {
   const scopeEmployees = teamIds.length
     ? await Employee.findByTeamIds(teamIds)
     : await Employee.selectWhere("status = 'Active'", [], 'ORDER BY name ASC');
-  const leaveByEmployee = await loadApprovedLeaveByEmployee(
-    scopeEmployees.map((e) => e.id),
+  const scopeIds = scopeEmployees.map((e) => e.id);
+  const { leaveByEmployee, leaveMetaByEmployee } = await loadApprovedLeaveByEmployee(
+    scopeIds,
     from,
     to
   );
@@ -523,15 +740,30 @@ async function sendAttendanceReports(period, opts = {}) {
   const includeInsights = period === 'monthly';
   let holidaySet = new Set();
   let shiftById = new Map();
+  let balanceByEmployee = new Map();
+  let strikeByEmployee = new Map();
   let allInsights = null;
+  /** @type {Map<string, object>} employeeId → pdf attachment payload */
+  let pdfByEmployeeId = new Map();
   if (includeInsights) {
+    const yearMonth = from.slice(0, 7);
     holidaySet = await Holiday.dateSet(from, to);
     shiftById = await loadShiftById(scopeEmployees);
-    allInsights = buildMonthlyInsights(scopeEmployees, allRows, {
+    balanceByEmployee = await loadLeaveBalancesByEmployee(scopeIds);
+    strikeByEmployee = await loadMonthlyStrikesByEmployee(scopeIds, yearMonth);
+    const baseInsights = buildMonthlyInsights(scopeEmployees, allRows, {
       holidaySet,
       leaveByEmployee,
       shiftById,
+      leaveMetaByEmployee,
+      balanceByEmployee,
+      strikeByEmployee,
     });
+    // One PDF per employee for monthly only (shared across recipients).
+    allInsights = await monthlyReportPdfService.attachMonthlyPdfs(baseInsights, { from, to });
+    pdfByEmployeeId = new Map(
+      allInsights.map((i) => [i.employeeId, i.pdf]).filter(([id]) => id)
+    );
   }
 
   for (const recipient of recipients) {
@@ -539,10 +771,45 @@ async function sendAttendanceReports(period, opts = {}) {
     const rows = employees.length
       ? await buildRows(employees, from, to, teamNameById, leaveByEmployee)
       : [];
-    const insights =
-      includeInsights && employees.length
-        ? buildMonthlyInsights(employees, rows, { holidaySet, leaveByEmployee, shiftById })
-        : null;
+    let insights = null;
+    if (includeInsights && employees.length) {
+      // Prefer org-wide PDF-enriched insights; fall back to recompute if not in scope.
+      const byId = new Map((allInsights || []).map((i) => [i.employeeId, i]));
+      insights = employees
+        .map((e) => byId.get(e.id))
+        .filter(Boolean)
+        .sort((a, b) => {
+          const byTeam = String(a.teamName || '').localeCompare(String(b.teamName || ''));
+          if (byTeam !== 0) return byTeam;
+          return String(a.employeeName || '').localeCompare(String(b.employeeName || ''));
+        });
+      // Anyone not in org-wide list (shouldn't happen) gets a fresh insight + PDF.
+      if (insights.length !== employees.length) {
+        const missing = employees.filter((e) => !byId.has(e.id));
+        if (missing.length) {
+          const extra = await monthlyReportPdfService.attachMonthlyPdfs(
+            buildMonthlyInsights(missing, rows, {
+              holidaySet,
+              leaveByEmployee,
+              shiftById,
+              leaveMetaByEmployee,
+              balanceByEmployee,
+              strikeByEmployee,
+            }),
+            { from, to }
+          );
+          insights = [...insights, ...extra].sort((a, b) => {
+            const byTeam = String(a.teamName || '').localeCompare(String(b.teamName || ''));
+            if (byTeam !== 0) return byTeam;
+            return String(a.employeeName || '').localeCompare(String(b.employeeName || ''));
+          });
+        }
+      }
+    }
+
+    const monthlyPdfs = includeInsights
+      ? (insights || []).map((i) => i.pdf).filter(Boolean)
+      : [];
 
     recipientReports.push({
       recipientId: recipient.id,
@@ -553,6 +820,7 @@ async function sendAttendanceReports(period, opts = {}) {
       rowCount: rows.length,
       rows,
       insights,
+      pdfs: monthlyPdfs,
       teams: groupRowsByTeam(rows, teams),
     });
 
@@ -602,6 +870,8 @@ async function sendAttendanceReports(period, opts = {}) {
       subject: periodLabel(period, from, to),
       rows,
       insights,
+      // Monthly: one PDF attachment per employee (not used for daily/weekly).
+      attachments: monthlyPdfs,
     });
 
     results.push({
@@ -611,6 +881,7 @@ async function sendAttendanceReports(period, opts = {}) {
       role: recipient.fields.Role || null,
       employeeCount: employees.length,
       rowCount: rows.length,
+      pdfCount: monthlyPdfs.length,
       sent: true,
     });
   }
@@ -624,6 +895,7 @@ async function sendAttendanceReports(period, opts = {}) {
     teams: teamsPayload,
     rows: allRows,
     insights: allInsights,
+    pdfCount: pdfByEmployeeId.size,
     recipientReports,
     results,
   };
@@ -638,4 +910,7 @@ module.exports = {
   weekBoundsPkt,
   monthBoundsPkt,
   periodLabel,
+  PROBATION_MONTHS,
+  averageHm,
+  addCalendarMonths,
 };

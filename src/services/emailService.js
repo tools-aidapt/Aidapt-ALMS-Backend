@@ -270,9 +270,10 @@ function sendAttendanceReminder({ to, employeeName, type, date, shiftTime, check
 
 /**
  * Attendance report for Managers / team leads / HR Admin.
- * Monthly reports may include `insights` (worked vs expected, onsite/remote, etc.).
+ * Monthly: cover email + one PDF attachment per employee.
+ * Daily/weekly: HTML day detail (no PDFs).
  * HTML follows Aidapt brand: navy + teal, operator-led clarity.
- * @param {{to, recipientName, role, period, from, to: toDate, subject, rows, insights?}} args
+ * @param {{to, recipientName, role, period, from, to: toDate, subject, rows, insights?, attachments?}} args
  */
 function sendAttendanceReport({
   to,
@@ -284,6 +285,7 @@ function sendAttendanceReport({
   subject,
   rows,
   insights,
+  attachments,
 }) {
   // Aidapt brand tokens (aidapt.co — operator-led AI firm)
   const brand = {
@@ -300,7 +302,6 @@ function sendAttendanceReport({
 
   const th = `padding:10px 12px;border-bottom:1px solid ${brand.line};text-align:left;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:${brand.muted};font-weight:600;background:${brand.surface}`;
   const td = `padding:10px 12px;border-bottom:1px solid ${brand.line};font-size:13px;color:${brand.ink};vertical-align:top`;
-  const tdCenter = `${td};text-align:center`;
 
   const tableRows = (rows || [])
     .map((r) => {
@@ -335,65 +336,54 @@ function sendAttendanceReport({
     })
     .join('');
 
-  const insightRows = (insights || [])
-    .map(
-      (i) => `
-      <tr>
-        <td style="${td}">${escapeHtml(i.teamName || '—')}</td>
-        <td style="${td}"><strong>${escapeHtml(i.employeeName || '')}</strong></td>
-        <td style="${td}">${escapeHtml(i.workedDuration || '—')}</td>
-        <td style="${td}">${escapeHtml(i.expectedDuration || '—')}</td>
-        <td style="${td}">${escapeHtml(i.hoursVarianceDuration || '—')}</td>
-        <td style="${tdCenter}">${i.onsiteDays}</td>
-        <td style="${tdCenter}">${i.remoteDays}</td>
-        <td style="${tdCenter}">${i.presentDays}</td>
-        <td style="${tdCenter}">${i.absentDays}</td>
-        <td style="${tdCenter}">${i.leaveDays}</td>
-        <td style="${tdCenter}">${i.lateDays}</td>
-      </tr>`
-    )
-    .join('');
-
   const rangeLabel = from === toDate ? from : `${from} → ${toDate}`;
   const periodTitle =
     period === 'daily' ? 'Daily' : period === 'weekly' ? 'Weekly' : 'Monthly';
 
   const isMonthly = period === 'monthly';
+  // Prefer explicit attachments list; fall back to insight.pdf.
+  const pdfAttachments = isMonthly
+    ? Array.isArray(attachments) && attachments.length
+      ? attachments
+      : (insights || []).map((i) => i.pdf).filter(Boolean)
+    : [];
+
+  const pdfListRows = pdfAttachments
+    .map(
+      (p) => `
+      <tr>
+        <td style="${td}">${escapeHtml(p.employeeName || '—')}</td>
+        <td style="${td}">${escapeHtml(p.filename || 'report.pdf')}</td>
+      </tr>`
+    )
+    .join('');
 
   const insightsSection =
-    isMonthly && insights && insights.length
+    isMonthly && pdfAttachments.length
       ? `
     <div>
-      <h2 style="margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600">Monthly summary</h2>
-      <p style="margin:0 0 14px;color:${brand.muted};font-size:13px">
-        Worked vs expected (shift days − holidays − leave). Onsite = Office · Remote = Remote In.
+      <h2 style="margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600">Monthly reports (PDF)</h2>
+      <p style="margin:0 0 14px;color:${brand.muted};font-size:13px;line-height:1.55">
+        One PDF per employee is attached to this email. Each file covers worked vs expected days,
+        absences, leave taken and balances, average check-in/out, late and strike counts, and probation.
       </p>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
         <thead>
           <tr>
-            <th style="${th}">Team</th>
             <th style="${th}">Employee</th>
-            <th style="${th}">Worked</th>
-            <th style="${th}">Expected</th>
-            <th style="${th}">Variance</th>
-            <th style="${th}">Onsite</th>
-            <th style="${th}">Remote</th>
-            <th style="${th}">Present</th>
-            <th style="${th}">Absent</th>
-            <th style="${th}">Leave</th>
-            <th style="${th}">Late</th>
+            <th style="${th}">Attachment</th>
           </tr>
         </thead>
-        <tbody>${insightRows}</tbody>
+        <tbody>${pdfListRows}</tbody>
       </table>
       <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
-        ${(insights || []).length} employee${(insights || []).length === 1 ? '' : 's'}
+        ${pdfAttachments.length} PDF${pdfAttachments.length === 1 ? '' : 's'} attached
       </p>
     </div>`
       : isMonthly
         ? `
     <p style="margin:0;padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px;border:1px solid ${brand.line};border-radius:8px">
-      No monthly summary for this view. If you lead a team, ensure members are assigned to your team in AIMS.
+      No monthly PDFs for this view. If you lead a team, ensure members are assigned to your team in AIMS.
     </p>`
         : '';
 
@@ -404,7 +394,7 @@ function sendAttendanceReport({
       </td>
     </tr>`;
 
-  // Monthly emails are summary-only (insights). Daily/weekly keep per-day detail.
+  // Monthly emails are PDF-cover only. Daily/weekly keep per-day detail.
   const dailySection = isMonthly
     ? ''
     : `
@@ -468,9 +458,10 @@ function sendAttendanceReport({
                 Hi ${escapeHtml(recipientName || '')},
               </p>
               <p style="margin:0 0 22px;font-size:14px;color:${brand.muted};line-height:1.55">
-                Here is your <strong style="color:${brand.ink}">${escapeHtml(period)}</strong> attendance ${isMonthly ? 'summary' : 'report'} for
+                Here is your <strong style="color:${brand.ink}">${escapeHtml(period)}</strong> attendance ${isMonthly ? 'report package' : 'report'} for
                 <strong style="color:${brand.ink}">${escapeHtml(rangeLabel)}</strong>
                 <span style="color:${brand.teal}"> · ${escapeHtml(role || 'team')} view</span>.
+                ${isMonthly ? ' Open the attached PDFs for each employee’s full monthly summary.' : ''}
               </p>
               ${insightsSection}
               ${dailySection}
@@ -491,22 +482,38 @@ function sendAttendanceReport({
 </body>
 </html>`;
 
+  // Graph / n8n attachment shape for monthly PDFs.
+  const attachmentPayload = pdfAttachments.map((p) => ({
+    filename: p.filename,
+    contentType: p.contentType || 'application/pdf',
+    contentBase64: p.contentBase64,
+    employeeId: p.employeeId || null,
+    employeeName: p.employeeName || null,
+  }));
+
   return dispatch('attendance.report', {
-    emailReason: 'attendance_report',
+    emailReason: isMonthly ? 'attendance_report_monthly_pdf' : 'attendance_report',
     to,
     employeeName: recipientName || null,
     employeeEmail: to,
     subject,
     html,
     text: stripHtml(html),
+    attachments: attachmentPayload,
     data: {
       period,
       from,
       to: toDate,
       role,
-      // Monthly: omit day-by-day rows from the email payload (summary via insights only).
+      // Monthly: omit day-by-day rows; insights without heavy base64 in nested data.
       rows: isMonthly ? [] : rows,
-      insights: insights || null,
+      insights: isMonthly
+        ? (insights || []).map(({ pdf, ...rest }) => ({
+            ...rest,
+            pdfFilename: pdf && pdf.filename ? pdf.filename : null,
+          }))
+        : insights || null,
+      pdfCount: attachmentPayload.length,
     },
   });
 }

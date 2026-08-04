@@ -58,7 +58,6 @@ function filterByTeamHints(rows, teamHints) {
 
 const th = `padding:10px 12px;border-bottom:1px solid ${brand.line};text-align:left;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:${brand.muted};font-weight:600;background:${brand.surface}`;
 const td = `padding:10px 12px;border-bottom:1px solid ${brand.line};font-size:13px;color:${brand.ink};vertical-align:top`;
-const tdCenter = `${td};text-align:center`;
 
 function buildDailyHtml(rows) {
   return (rows || [])
@@ -95,96 +94,64 @@ function buildDailyHtml(rows) {
     .join('');
 }
 
-function buildInsightsHtml(insights) {
-  if (!insights || !insights.length) {
-    return `<p style="margin:0;padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px;border:1px solid ${brand.line};border-radius:8px">
-  No monthly summary for this view. Ensure your team members are assigned under your team in AIMS.
-</p>`;
-  }
-  const body = insights
-    .map(
-      (i) => `<tr>
-  <td style="${td}">${esc(i.teamName || '—')}</td>
-  <td style="${td}"><strong>${esc(i.employeeName || '')}</strong></td>
-  <td style="${td}">${esc(i.workedDuration || '—')}</td>
-  <td style="${td}">${esc(i.expectedDuration || '—')}</td>
-  <td style="${td}">${esc(i.hoursVarianceDuration || '—')}</td>
-  <td style="${tdCenter}">${i.onsiteDays}</td>
-  <td style="${tdCenter}">${i.remoteDays}</td>
-  <td style="${tdCenter}">${i.presentDays}</td>
-  <td style="${tdCenter}">${i.absentDays}</td>
-  <td style="${tdCenter}">${i.leaveDays}</td>
-  <td style="${tdCenter}">${i.lateDays}</td>
-</tr>`
-    )
-    .join('');
-  return `
-<div>
-  <h2 style="margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600">Monthly summary</h2>
-  <p style="margin:0 0 14px;color:${brand.muted};font-size:13px">
-    Worked vs expected (shift days − holidays − leave). Onsite = Office · Remote = Remote In.
-  </p>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
-    <thead>
-      <tr>
-        <th style="${th}">Team</th>
-        <th style="${th}">Employee</th>
-        <th style="${th}">Worked</th>
-        <th style="${th}">Expected</th>
-        <th style="${th}">Variance</th>
-        <th style="${th}">Onsite</th>
-        <th style="${th}">Remote</th>
-        <th style="${th}">Present</th>
-        <th style="${th}">Absent</th>
-        <th style="${th}">Leave</th>
-        <th style="${th}">Late</th>
-      </tr>
-    </thead>
-    <tbody>${body}</tbody>
+function buildMonthlyPdfCoverHtml({ toName, roleLabel, insight }) {
+  const rangeLabel = from === to ? from : `${from} → ${to}`;
+  const pdfName = (insight.pdf && insight.pdf.filename) || 'monthly.pdf';
+  return `<!DOCTYPE html>
+<html lang="en">
+<body style="margin:0;padding:0;background:${brand.surface};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${brand.surface};padding:24px 12px">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:${brand.white};border:1px solid ${brand.line};border-radius:12px;overflow:hidden">
+          <tr>
+            <td style="background:${brand.navy};padding:22px 28px">
+              <div style="font-size:20px;font-weight:700;color:${brand.white}">Aidapt<span style="color:${brand.teal}">.</span></div>
+              <div style="margin-top:4px;font-size:12px;color:rgba(255,255,255,0.65);letter-spacing:0.06em;text-transform:uppercase">Attendance &amp; Leave · ALMS</div>
+            </td>
+          </tr>
+          <tr><td style="height:3px;background:${brand.teal};font-size:0;line-height:0">&nbsp;</td></tr>
+          <tr>
+            <td style="padding:28px">
+              <p style="margin:0 0 8px;font-size:15px;color:${brand.ink}">Hi ${esc(toName)},</p>
+              <p style="margin:0 0 16px;font-size:14px;color:${brand.muted};line-height:1.55">
+                Monthly attendance PDF for <strong style="color:${brand.ink}">${esc(insight.employeeName || 'employee')}</strong>
+                (${esc(insight.teamName || '—')}) · <strong style="color:${brand.ink}">${esc(rangeLabel)}</strong>
+                <span style="color:${brand.teal}"> · ${esc(roleLabel)} view</span>.
+              </p>
+              <p style="margin:0 0 8px;font-size:13px;color:${brand.ink}">
+                Worked <strong>${insight.workedDays ?? 0}</strong> / expected <strong>${insight.expectedWorkingDays ?? 0}</strong>
+                · Absent <strong>${insight.absentDays ?? 0}</strong>
+                · Late <strong>${insight.lateCount ?? insight.lateDays ?? 0}</strong>
+                · Strikes <strong>${insight.strikeCount ?? 0}</strong>
+              </p>
+              <p style="margin:0;font-size:13px;color:${brand.muted}">
+                Full details are in the attached PDF: <strong style="color:${brand.ink}">${esc(pdfName)}</strong>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 28px;background:${brand.surface};border-top:1px solid ${brand.line}">
+              <p style="margin:0;font-size:11px;color:${brand.muted}">Sent by Aidapt ALMS · aidapt.co</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
   </table>
-  <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
-    ${insights.length} employee${insights.length === 1 ? '' : 's'}
-  </p>
-</div>`;
+</body>
+</html>`;
 }
 
-function buildEmailHtml({ toName, roleLabel, rows, insights }) {
+function buildEmailHtml({ toName, roleLabel, rows }) {
   const rangeLabel = from === to ? from : `${from} → ${to}`;
-  const periodTitle =
-    period === 'daily' ? 'Daily' : period === 'weekly' ? 'Weekly' : 'Monthly';
-  const isMonthly = period === 'monthly';
-  const insightsHtml = isMonthly ? buildInsightsHtml(insights || []) : '';
+  const periodTitle = period === 'daily' ? 'Daily' : period === 'weekly' ? 'Weekly' : 'Monthly';
   const daily = buildDailyHtml(rows);
   const emptyDaily = `<tr>
   <td colspan="8" style="padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px">
     No attendance rows in this view. Ensure your team members are assigned under your team in AIMS.
   </td>
 </tr>`;
-  const dailySection = isMonthly
-    ? ''
-    : `<div>
-                <h2 style="margin:0 0 14px;font-size:16px;color:${brand.ink};font-weight:600">Daily detail</h2>
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
-                  <thead>
-                    <tr>
-                      <th style="${th}">Team</th>
-                      <th style="${th}">Employee</th>
-                      <th style="${th}">Date</th>
-                      <th style="${th}">Check-in</th>
-                      <th style="${th}">Check-out</th>
-                      <th style="${th}">Status</th>
-                      <th style="${th}">Mode</th>
-                      <th style="${th}">Worked</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${daily || emptyDaily}
-                  </tbody>
-                </table>
-                <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
-                  ${(rows || []).length} row${(rows || []).length === 1 ? '' : 's'}
-                </p>
-              </div>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -219,12 +186,33 @@ function buildEmailHtml({ toName, roleLabel, rows, insights }) {
             <td style="padding:28px">
               <p style="margin:0 0 8px;font-size:15px;color:${brand.ink}">Hi ${esc(toName)},</p>
               <p style="margin:0 0 22px;font-size:14px;color:${brand.muted};line-height:1.55">
-                Here is your <strong style="color:${brand.ink}">${esc(period)}</strong> attendance ${isMonthly ? 'summary' : 'report'} for
+                Here is your <strong style="color:${brand.ink}">${esc(period)}</strong> attendance report for
                 <strong style="color:${brand.ink}">${esc(rangeLabel)}</strong>
                 <span style="color:${brand.teal}"> · ${esc(roleLabel)} view</span>.
               </p>
-              ${insightsHtml}
-              ${dailySection}
+              <div>
+                <h2 style="margin:0 0 14px;font-size:16px;color:${brand.ink};font-weight:600">Daily detail</h2>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
+                  <thead>
+                    <tr>
+                      <th style="${th}">Team</th>
+                      <th style="${th}">Employee</th>
+                      <th style="${th}">Date</th>
+                      <th style="${th}">Check-in</th>
+                      <th style="${th}">Check-out</th>
+                      <th style="${th}">Status</th>
+                      <th style="${th}">Mode</th>
+                      <th style="${th}">Worked</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${daily || emptyDaily}
+                  </tbody>
+                </table>
+                <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
+                  ${(rows || []).length} row${(rows || []).length === 1 ? '' : 's'}
+                </p>
+              </div>
             </td>
           </tr>
           <tr>
@@ -243,20 +231,45 @@ function buildEmailHtml({ toName, roleLabel, rows, insights }) {
 </html>`;
 }
 
+function formatLeaveItemsMd(items) {
+  if (!items || !items.length) return '—';
+  return items
+    .map((it) => {
+      const type = it.leaveType || 'Leave';
+      const range =
+        it.fromDate && it.toDate && it.fromDate !== it.toDate
+          ? `${it.fromDate} → ${it.toDate}`
+          : it.fromDate || it.toDate || '—';
+      const days = it.daysInPeriod != null ? ` (${it.daysInPeriod}d)` : '';
+      return `${type} ${range}${days}`;
+    })
+    .join('; ');
+}
+
 function buildInsightsMarkdown(insights) {
   if (!insights || !insights.length) return '_No monthly summary for this view._\n';
-  const lines = [
-    '### Monthly summary',
-    '',
-    '| Team | Employee | Worked | Expected | Variance | Onsite | Remote | Present | Absent | Leave | Late |',
-    '| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
-  ];
+  const lines = ['### Monthly employee summary', '', '_PDFs emailed one-per-employee to managers._', ''];
   for (const i of insights) {
+    const probation = i.onProbation
+      ? `On probation${i.probationEndsOn ? ` (ends ${i.probationEndsOn})` : ''}`
+      : i.employmentStatus || 'Full-time';
+    const pdfName = (i.pdf && i.pdf.filename) || null;
+    lines.push(`**${mdCell(i.employeeName)}** · ${mdCell(i.teamName)} · ${mdCell(probation)}`);
     lines.push(
-      `| ${mdCell(i.teamName)} | ${mdCell(i.employeeName)} | ${mdCell(i.workedDuration)} | ${mdCell(i.expectedDuration)} | ${mdCell(i.hoursVarianceDuration)} | ${i.onsiteDays} | ${i.remoteDays} | ${i.presentDays} | ${i.absentDays} | ${i.leaveDays} | ${i.lateDays} |`
+      `- Days: **${i.workedDays ?? 0}** worked / **${i.expectedWorkingDays ?? 0}** expected · Absent **${i.absentDays ?? 0}**`
     );
+    lines.push(
+      `- Late **${i.lateCount ?? i.lateDays ?? 0}** · Strikes **${i.strikeCount ?? 0}** · Avg in/out **${mdCell(i.avgCheckInTime)} / ${mdCell(i.avgCheckOutTime)}**`
+    );
+    lines.push(
+      `- Leave taken: ${mdCell(i.leaveTakenLabel || 'None')}${
+        i.leaveItems && i.leaveItems.length ? ` · ${mdCell(formatLeaveItemsMd(i.leaveItems))}` : ''
+      }`
+    );
+    lines.push(`- Balance: ${mdCell(i.leaveBalancesLabel)}`);
+    if (pdfName) lines.push(`- PDF: \`${mdCell(pdfName)}\``);
+    lines.push('');
   }
-  lines.push('');
   return lines.join('\n');
 }
 
@@ -356,7 +369,8 @@ const targets = [
   },
 ];
 
-const emails = targets.map((t) => {
+const emails = [];
+for (const t of targets) {
   const report = findReport(t.matchers);
   let rows;
   let insights;
@@ -369,7 +383,6 @@ const emails = targets.map((t) => {
     rows = report ? report.rows || [] : [];
     insights = report ? report.insights || [] : [];
     roleLabel = 'team';
-    // Safety net if API scope is empty (e.g. manager_id not set yet): filter by team name.
     if (
       (!(rows || []).length || (period === 'monthly' && !(insights || []).length)) &&
       t.teamHints &&
@@ -384,19 +397,50 @@ const emails = targets.map((t) => {
       ? report.email
       : t.emailFallback;
   const toName = (report && report.name) || t.label;
-  return {
-    channel: 'email',
-    to: toEmail,
-    toName,
-    subject,
-    html: buildEmailHtml({ toName, roleLabel, rows, insights }),
-    period,
-    from,
-    toDate: to,
-    rowCount: period === 'monthly' ? (insights || []).length : (rows || []).length,
-    scope: roleLabel,
-  };
-});
+
+  if (period === 'monthly') {
+    // One email + one PDF per employee (monthly only).
+    const list = Array.isArray(insights) ? insights : [];
+    for (const insight of list) {
+      const pdf = insight.pdf;
+      if (!pdf || !pdf.contentBase64) continue;
+      emails.push({
+        channel: 'email',
+        to: toEmail,
+        toName,
+        subject: `Monthly attendance — ${insight.employeeName || 'Employee'} — ${rangeLabel}`,
+        html: buildMonthlyPdfCoverHtml({ toName, roleLabel, insight }),
+        period,
+        from,
+        toDate: to,
+        hasPdf: true,
+        employeeId: insight.employeeId || null,
+        employeeName: insight.employeeName || null,
+        rowCount: 1,
+        scope: roleLabel,
+        pdf: {
+          filename: pdf.filename,
+          contentBase64: pdf.contentBase64,
+          contentType: pdf.contentType || 'application/pdf',
+        },
+      });
+    }
+  } else {
+    emails.push({
+      channel: 'email',
+      to: toEmail,
+      toName,
+      subject,
+      html: buildEmailHtml({ toName, roleLabel, rows }),
+      period,
+      from,
+      toDate: to,
+      hasPdf: false,
+      rowCount: (rows || []).length,
+      scope: roleLabel,
+    });
+  }
+}
 
 const clickupMarkdown = buildClickUpMarkdown({
   rows: allRows,

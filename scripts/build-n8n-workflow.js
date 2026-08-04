@@ -126,6 +126,32 @@ const workflow = {
       position: [96, 688],
     },
     {
+      parameters: {},
+      id: 'manual-july-monthly',
+      name: 'Manual Test (July monthly)',
+      type: 'n8n-nodes-base.manualTrigger',
+      typeVersion: 1,
+      position: [-176, 912],
+    },
+    {
+      parameters: {
+        assignments: {
+          assignments: [
+            { id: 'j1', name: 'period', value: 'monthly', type: 'string' },
+            { id: 'j2', name: 'from', value: '2026-07-01', type: 'string' },
+            { id: 'j3', name: 'to', value: '2026-07-31', type: 'string' },
+            { id: 'j4', name: 'force', value: true, type: 'boolean' },
+          ],
+        },
+        options: {},
+      },
+      id: 'period-july-monthly',
+      name: 'Period = July 2026 monthly',
+      type: 'n8n-nodes-base.set',
+      typeVersion: 3.4,
+      position: [96, 912],
+    },
+    {
       parameters: {
         method: 'POST',
         url: 'https://aidapt-alms-backend-3was.onrender.com/api/jobs/attendance-report',
@@ -139,10 +165,11 @@ const workflow = {
         sendBody: true,
         specifyBody: 'json',
         jsonBody:
-          "={{ JSON.stringify({ period: $json.period, force: $json.force === true }) }}",
+          "={{ (() => { const b = { period: $json.period, force: $json.force === true }; if ($json.from) b.from = $json.from; if ($json.to) b.to = $json.to; if ($json.date) b.date = $json.date; return JSON.stringify(b); })() }}",
         options: {
           response: { response: {} },
-          timeout: 120000,
+          // Monthly ranges (e.g. full July) can take longer than 2 minutes.
+          timeout: 300000,
         },
       },
       id: 'af8641c7-5dd2-4ba2-a230-34a3aa1f7dff',
@@ -172,6 +199,96 @@ const workflow = {
     },
     {
       parameters: {
+        jsCode: `// Convert monthly PDF base64 → n8n binary for Outlook attachment.
+const results = [];
+for (const item of $input.all()) {
+  const j = { ...item.json };
+  const pdf = j.pdf;
+  delete j.pdf;
+  if (pdf && pdf.contentBase64) {
+    results.push({
+      json: { ...j, hasPdf: true },
+      binary: {
+        pdf: {
+          data: pdf.contentBase64,
+          fileName: pdf.filename || 'monthly.pdf',
+          mimeType: pdf.contentType || 'application/pdf',
+        },
+      },
+    });
+  } else {
+    results.push({ json: { ...j, hasPdf: false } });
+  }
+}
+return results;`,
+      },
+      id: 'prep-pdf-binary-001',
+      name: 'Prepare PDF binary',
+      type: 'n8n-nodes-base.code',
+      typeVersion: 2,
+      position: [1040, 208],
+    },
+    {
+      parameters: {
+        conditions: {
+          options: {
+            caseSensitive: true,
+            leftValue: '',
+            typeValidation: 'strict',
+            version: 2,
+          },
+          conditions: [
+            {
+              id: 'cond-has-pdf',
+              leftValue: '={{ $json.hasPdf }}',
+              rightValue: true,
+              operator: {
+                type: 'boolean',
+                operation: 'equals',
+              },
+            },
+          ],
+          combinator: 'and',
+        },
+        options: {},
+      },
+      id: 'if-monthly-pdf-001',
+      name: 'IF has PDF',
+      type: 'n8n-nodes-base.if',
+      typeVersion: 2.2,
+      position: [1248, 208],
+    },
+    {
+      parameters: {
+        toRecipients: '={{ $json.to }}',
+        subject: '={{ $json.subject }}',
+        bodyContent: '={{ $json.html }}',
+        additionalFields: {
+          bodyContentType: 'html',
+          attachments: {
+            attachments: [
+              {
+                binaryPropertyName: 'pdf',
+              },
+            ],
+          },
+        },
+      },
+      id: 'outlook-with-pdf-001',
+      name: 'Send via Outlook (PDF)',
+      type: 'n8n-nodes-base.microsoftOutlook',
+      typeVersion: 2,
+      position: [1488, 112],
+      webhookId: 'bb46f75e-ebca-42ff-acd4-c2070fa0ba46',
+      credentials: {
+        microsoftOutlookOAuth2Api: {
+          id: 'm9WTLZOWpRKaVwEa',
+          name: 'Sofi',
+        },
+      },
+    },
+    {
+      parameters: {
         toRecipients: '={{ $json.to }}',
         subject: '={{ $json.subject }}',
         bodyContent: '={{ $json.html }}',
@@ -183,7 +300,7 @@ const workflow = {
       name: 'Send via Outlook',
       type: 'n8n-nodes-base.microsoftOutlook',
       typeVersion: 2,
-      position: [1072, 208],
+      position: [1488, 320],
       webhookId: 'bb46f75e-ebca-42ff-acd4-c2070fa0ba46',
       credentials: {
         microsoftOutlookOAuth2Api: {
@@ -231,6 +348,9 @@ const workflow = {
     'Manual Test (daily)': {
       main: [[{ node: 'Period = daily (manual)', type: 'main', index: 0 }]],
     },
+    'Manual Test (July monthly)': {
+      main: [[{ node: 'Period = July 2026 monthly', type: 'main', index: 0 }]],
+    },
     'Period = daily': {
       main: [[{ node: 'Call AIMS attendance-report', type: 'main', index: 0 }]],
     },
@@ -241,6 +361,9 @@ const workflow = {
       main: [[{ node: 'Call AIMS attendance-report', type: 'main', index: 0 }]],
     },
     'Period = daily (manual)': {
+      main: [[{ node: 'Call AIMS attendance-report', type: 'main', index: 0 }]],
+    },
+    'Period = July 2026 monthly': {
       main: [[{ node: 'Call AIMS attendance-report', type: 'main', index: 0 }]],
     },
     'Call AIMS attendance-report': {
@@ -255,7 +378,16 @@ const workflow = {
       ],
     },
     'Split Out emails': {
-      main: [[{ node: 'Send via Outlook', type: 'main', index: 0 }]],
+      main: [[{ node: 'Prepare PDF binary', type: 'main', index: 0 }]],
+    },
+    'Prepare PDF binary': {
+      main: [[{ node: 'IF has PDF', type: 'main', index: 0 }]],
+    },
+    'IF has PDF': {
+      main: [
+        [{ node: 'Send via Outlook (PDF)', type: 'main', index: 0 }],
+        [{ node: 'Send via Outlook', type: 'main', index: 0 }],
+      ],
     },
   },
 };

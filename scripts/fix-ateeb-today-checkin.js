@@ -48,7 +48,7 @@ async function main() {
     },
   };
 
-  const checkIn = pktToUtcIso(today, 10, 5); // 10:05 AM PKT
+  const checkIn = pktToUtcIso(today, 10, 15); // 10:15 AM PKT
   const lateness = computeLateness(shift, checkIn);
   const worked = computeWorked(checkIn, punch.check_out_time, shiftLengthHours(shift));
 
