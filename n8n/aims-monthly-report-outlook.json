@@ -3,7 +3,7 @@
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "3995614c53330b8235732b6439f4722022fa77b84f9cd17e44c49abe50c94c1f",
-    "description": "Monthly only: one PDF per employee emailed via Outlook, markdown summary to ClickUp. Cron runs 1st of month 08:15 PKT for the previous month."
+    "description": "Monthly: one package email per manager/HR with all employee PDFs attached. Short markdown to ClickUp Chat; PDFs uploaded to a ClickUp task when CLICKUP_MONTHLY_LIST_ID is set."
   },
   "settings": {
     "executionOrder": "v1",
@@ -28,19 +28,19 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -320,
-        200
+        -400,
+        160
       ]
     },
     {
       "parameters": {},
-      "id": "manual-prev-month-001",
+      "id": "manual-prev-001",
       "name": "Manual — previous month",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -320,
-        420
+        -400,
+        360
       ]
     },
     {
@@ -50,8 +50,8 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -320,
-        640
+        -400,
+        560
       ]
     },
     {
@@ -73,8 +73,8 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -80,
-        200
+        -160,
+        160
       ]
     },
     {
@@ -96,21 +96,21 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        -80,
-        420
+        -160,
+        360
       ]
     },
     {
       "parameters": {
-        "jsCode": "// Previous calendar month bounds in PKT (UTC+5, no DST).\nconst now = new Date();\nconst pktMs = now.getTime() + 5 * 60 * 60 * 1000;\nconst pkt = new Date(pktMs);\nconst y = pkt.getUTCFullYear();\nconst m = pkt.getUTCMonth(); // 0-based month of \"today\" in PKT\nconst prev = new Date(Date.UTC(y, m - 1, 1));\nconst last = new Date(Date.UTC(prev.getUTCFullYear(), prev.getUTCMonth() + 1, 0)).getUTCDate();\nconst pad = (n) => String(n).padStart(2, '0');\nconst from = `${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}-01`;\nconst to = `${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}-${pad(last)}`;\nreturn [{ json: { period: 'monthly', from, to, force: $json.force === true } }];"
+        "jsCode": "// Previous calendar month bounds in PKT (UTC+5, no DST).\nconst now = new Date();\nconst pktMs = now.getTime() + 5 * 60 * 60 * 1000;\nconst pkt = new Date(pktMs);\nconst y = pkt.getUTCFullYear();\nconst m = pkt.getUTCMonth();\nconst prev = new Date(Date.UTC(y, m - 1, 1));\nconst last = new Date(Date.UTC(prev.getUTCFullYear(), prev.getUTCMonth() + 1, 0)).getUTCDate();\nconst pad = (n) => String(n).padStart(2, '0');\nconst from = `${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}-01`;\nconst to = `${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}-${pad(last)}`;\nreturn [{ json: { period: 'monthly', from, to, force: $json.force === true } }];"
       },
-      "id": "prev-month-bounds-001",
+      "id": "prev-bounds-001",
       "name": "Previous month bounds",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        160,
-        300
+        80,
+        260
       ]
     },
     {
@@ -145,13 +145,13 @@
         },
         "options": {}
       },
-      "id": "july-2026-set-001",
+      "id": "july-set-001",
       "name": "Period = July 2026 monthly",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        160,
-        640
+        80,
+        560
       ]
     },
     {
@@ -181,26 +181,26 @@
           "timeout": 300000
         }
       },
-      "id": "call-aims-monthly-001",
+      "id": "call-aims-001",
       "name": "Call AIMS monthly report",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        420,
-        400
+        340,
+        360
       ]
     },
     {
       "parameters": {
-        "jsCode": "const payload = items[0].json;\nconst data = payload.data || payload;\nconst period = data.period || 'daily';\nconst from = data.from;\nconst to = data.to;\nconst allRows = Array.isArray(data.rows) ? data.rows : [];\nconst allInsights = Array.isArray(data.insights) ? data.insights : [];\nconst recipientReports = Array.isArray(data.recipientReports) ? data.recipientReports : [];\n\n// Aidapt brand tokens\nconst brand = {\n  navy: '#07111F',\n  teal: '#14B8A6',\n  tealDark: '#0F766E',\n  ink: '#0B1220',\n  muted: '#5B6575',\n  line: '#E6E9EF',\n  surface: '#F7F8FA',\n  white: '#FFFFFF',\n  late: '#B45309',\n  absent: '#B91C1C',\n};\n\nfunction esc(s) {\n  return String(s ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n}\n\nfunction mdCell(s) {\n  return String(s ?? '—').replace(/\\|/g, '\\\\|').replace(/\\n/g, ' ');\n}\n\nfunction norm(s) {\n  return String(s || '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction findReport(matchers) {\n  return (\n    recipientReports.find((r) => {\n      const n = norm(r.name);\n      return matchers.some((m) => n.includes(m));\n    }) || null\n  );\n}\n\nfunction filterByTeamHints(rows, teamHints) {\n  if (!teamHints.length) return rows || [];\n  return (rows || []).filter((r) =>\n    teamHints.some((h) => norm(r.teamName || '').includes(h))\n  );\n}\n\nconst th = `padding:10px 12px;border-bottom:1px solid ${brand.line};text-align:left;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:${brand.muted};font-weight:600;background:${brand.surface}`;\nconst td = `padding:10px 12px;border-bottom:1px solid ${brand.line};font-size:13px;color:${brand.ink};vertical-align:top`;\n\nfunction buildDailyHtml(rows) {\n  return (rows || [])\n    .map((r) => {\n      const checkOut =\n        r.status === 'Still checked in'\n          ? 'Still checked in'\n          : r.status === 'On Leave'\n            ? '—'\n            : r.checkOutTime || '—';\n      const checkIn = r.status === 'On Leave' ? '—' : r.checkInTime || '—';\n      const statusLabel = `${r.status || ''}${r.isLate ? ' (Late)' : ''}`;\n      const statusColor =\n        r.status === 'Absent'\n          ? brand.absent\n          : r.status === 'On Leave'\n            ? brand.tealDark\n            : r.status === 'Still checked in'\n              ? brand.late\n              : r.isLate\n                ? brand.late\n                : brand.ink;\n      return `<tr>\n  <td style=\"${td}\">${esc(r.teamName || '—')}</td>\n  <td style=\"${td}\"><strong>${esc(r.employeeName || '')}</strong></td>\n  <td style=\"${td}\">${esc(r.date)}</td>\n  <td style=\"${td}\">${esc(checkIn)}</td>\n  <td style=\"${td}\">${esc(checkOut)}</td>\n  <td style=\"${td};color:${statusColor}\">${esc(statusLabel)}</td>\n  <td style=\"${td}\">${esc(r.mode || '—')}</td>\n  <td style=\"${td}\">${esc(r.workedDuration || '—')}</td>\n</tr>`;\n    })\n    .join('');\n}\n\nfunction buildMonthlyPdfCoverHtml({ toName, roleLabel, insight }) {\n  const rangeLabel = from === to ? from : `${from} → ${to}`;\n  const pdfName = (insight.pdf && insight.pdf.filename) || 'monthly.pdf';\n  return `<!DOCTYPE html>\n<html lang=\"en\">\n<body style=\"margin:0;padding:0;background:${brand.surface};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${brand.surface};padding:24px 12px\">\n    <tr>\n      <td align=\"center\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:640px;background:${brand.white};border:1px solid ${brand.line};border-radius:12px;overflow:hidden\">\n          <tr>\n            <td style=\"background:${brand.navy};padding:22px 28px\">\n              <div style=\"font-size:20px;font-weight:700;color:${brand.white}\">Aidapt<span style=\"color:${brand.teal}\">.</span></div>\n              <div style=\"margin-top:4px;font-size:12px;color:rgba(255,255,255,0.65);letter-spacing:0.06em;text-transform:uppercase\">Attendance &amp; Leave · ALMS</div>\n            </td>\n          </tr>\n          <tr><td style=\"height:3px;background:${brand.teal};font-size:0;line-height:0\">&nbsp;</td></tr>\n          <tr>\n            <td style=\"padding:28px\">\n              <p style=\"margin:0 0 8px;font-size:15px;color:${brand.ink}\">Hi ${esc(toName)},</p>\n              <p style=\"margin:0 0 16px;font-size:14px;color:${brand.muted};line-height:1.55\">\n                Monthly attendance PDF for <strong style=\"color:${brand.ink}\">${esc(insight.employeeName || 'employee')}</strong>\n                (${esc(insight.teamName || '—')}) · <strong style=\"color:${brand.ink}\">${esc(rangeLabel)}</strong>\n                <span style=\"color:${brand.teal}\"> · ${esc(roleLabel)} view</span>.\n              </p>\n              <p style=\"margin:0 0 8px;font-size:13px;color:${brand.ink}\">\n                Worked <strong>${insight.workedDays ?? 0}</strong> / expected <strong>${insight.expectedWorkingDays ?? 0}</strong>\n                · Absent <strong>${insight.absentDays ?? 0}</strong>\n                · Late <strong>${insight.lateCount ?? insight.lateDays ?? 0}</strong>\n                · Strikes <strong>${insight.strikeCount ?? 0}</strong>\n              </p>\n              <p style=\"margin:0;font-size:13px;color:${brand.muted}\">\n                Full details are in the attached PDF: <strong style=\"color:${brand.ink}\">${esc(pdfName)}</strong>\n              </p>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"padding:16px 28px;background:${brand.surface};border-top:1px solid ${brand.line}\">\n              <p style=\"margin:0;font-size:11px;color:${brand.muted}\">Sent by Aidapt ALMS · aidapt.co</p>\n            </td>\n          </tr>\n        </table>\n      </td>\n    </tr>\n  </table>\n</body>\n</html>`;\n}\n\nfunction buildEmailHtml({ toName, roleLabel, rows }) {\n  const rangeLabel = from === to ? from : `${from} → ${to}`;\n  const periodTitle = period === 'daily' ? 'Daily' : period === 'weekly' ? 'Weekly' : 'Monthly';\n  const daily = buildDailyHtml(rows);\n  const emptyDaily = `<tr>\n  <td colspan=\"8\" style=\"padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px\">\n    No attendance rows in this view. Ensure your team members are assigned under your team in AIMS.\n  </td>\n</tr>`;\n\n  return `<!DOCTYPE html>\n<html lang=\"en\">\n<body style=\"margin:0;padding:0;background:${brand.surface};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${brand.surface};padding:24px 12px\">\n    <tr>\n      <td align=\"center\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:880px;background:${brand.white};border:1px solid ${brand.line};border-radius:12px;overflow:hidden\">\n          <tr>\n            <td style=\"background:${brand.navy};padding:22px 28px\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td>\n                    <div style=\"font-size:20px;font-weight:700;color:${brand.white};letter-spacing:-0.02em\">\n                      Aidapt<span style=\"color:${brand.teal}\">.</span>\n                    </div>\n                    <div style=\"margin-top:4px;font-size:12px;color:rgba(255,255,255,0.65);letter-spacing:0.06em;text-transform:uppercase\">\n                      Attendance &amp; Leave · ALMS\n                    </div>\n                  </td>\n                  <td align=\"right\" style=\"color:${brand.teal};font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase\">\n                    ${esc(periodTitle)} report\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"height:3px;background:${brand.teal};font-size:0;line-height:0\">&nbsp;</td>\n          </tr>\n          <tr>\n            <td style=\"padding:28px\">\n              <p style=\"margin:0 0 8px;font-size:15px;color:${brand.ink}\">Hi ${esc(toName)},</p>\n              <p style=\"margin:0 0 22px;font-size:14px;color:${brand.muted};line-height:1.55\">\n                Here is your <strong style=\"color:${brand.ink}\">${esc(period)}</strong> attendance report for\n                <strong style=\"color:${brand.ink}\">${esc(rangeLabel)}</strong>\n                <span style=\"color:${brand.teal}\"> · ${esc(roleLabel)} view</span>.\n              </p>\n              <div>\n                <h2 style=\"margin:0 0 14px;font-size:16px;color:${brand.ink};font-weight:600\">Daily detail</h2>\n                <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden\">\n                  <thead>\n                    <tr>\n                      <th style=\"${th}\">Team</th>\n                      <th style=\"${th}\">Employee</th>\n                      <th style=\"${th}\">Date</th>\n                      <th style=\"${th}\">Check-in</th>\n                      <th style=\"${th}\">Check-out</th>\n                      <th style=\"${th}\">Status</th>\n                      <th style=\"${th}\">Mode</th>\n                      <th style=\"${th}\">Worked</th>\n                    </tr>\n                  </thead>\n                  <tbody>\n                    ${daily || emptyDaily}\n                  </tbody>\n                </table>\n                <p style=\"margin:14px 0 0;color:${brand.muted};font-size:12px\">\n                  ${(rows || []).length} row${(rows || []).length === 1 ? '' : 's'}\n                </p>\n              </div>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"padding:16px 28px;background:${brand.surface};border-top:1px solid ${brand.line}\">\n              <p style=\"margin:0;font-size:11px;color:${brand.muted};line-height:1.5\">\n                Sent by Aidapt ALMS · The operator’s AI firm ·\n                <a href=\"https://aidapt.co\" style=\"color:${brand.tealDark};text-decoration:none\">aidapt.co</a>\n              </p>\n            </td>\n          </tr>\n        </table>\n      </td>\n    </tr>\n  </table>\n</body>\n</html>`;\n}\n\nfunction formatLeaveItemsMd(items) {\n  if (!items || !items.length) return '—';\n  return items\n    .map((it) => {\n      const type = it.leaveType || 'Leave';\n      const range =\n        it.fromDate && it.toDate && it.fromDate !== it.toDate\n          ? `${it.fromDate} → ${it.toDate}`\n          : it.fromDate || it.toDate || '—';\n      const days = it.daysInPeriod != null ? ` (${it.daysInPeriod}d)` : '';\n      return `${type} ${range}${days}`;\n    })\n    .join('; ');\n}\n\nfunction buildInsightsMarkdown(insights) {\n  if (!insights || !insights.length) return '_No monthly summary for this view._\\n';\n  const lines = ['### Monthly employee summary', '', '_PDFs emailed one-per-employee to managers._', ''];\n  for (const i of insights) {\n    const probation = i.onProbation\n      ? `On probation${i.probationEndsOn ? ` (ends ${i.probationEndsOn})` : ''}`\n      : i.employmentStatus || 'Full-time';\n    const pdfName = (i.pdf && i.pdf.filename) || null;\n    lines.push(`**${mdCell(i.employeeName)}** · ${mdCell(i.teamName)} · ${mdCell(probation)}`);\n    lines.push(\n      `- Days: **${i.workedDays ?? 0}** worked / **${i.expectedWorkingDays ?? 0}** expected · Absent **${i.absentDays ?? 0}**`\n    );\n    lines.push(\n      `- Late **${i.lateCount ?? i.lateDays ?? 0}** · Strikes **${i.strikeCount ?? 0}** · Avg in/out **${mdCell(i.avgCheckInTime)} / ${mdCell(i.avgCheckOutTime)}**`\n    );\n    lines.push(\n      `- Leave taken: ${mdCell(i.leaveTakenLabel || 'None')}${\n        i.leaveItems && i.leaveItems.length ? ` · ${mdCell(formatLeaveItemsMd(i.leaveItems))}` : ''\n      }`\n    );\n    lines.push(`- Balance: ${mdCell(i.leaveBalancesLabel)}`);\n    if (pdfName) lines.push(`- PDF: \\`${mdCell(pdfName)}\\``);\n    lines.push('');\n  }\n  return lines.join('\\n');\n}\n\nfunction buildDailyMarkdown(rows) {\n  const lines = [\n    '### Daily detail',\n    '',\n    '| Team | Employee | Date | In | Out | Status | Mode | Worked |',\n    '| --- | --- | --- | --- | --- | --- | --- | --- |',\n  ];\n  for (const r of rows || []) {\n    const checkOut =\n      r.status === 'Still checked in'\n        ? 'Still checked in'\n        : r.status === 'On Leave'\n          ? '—'\n          : r.checkOutTime || '—';\n    const checkIn = r.status === 'On Leave' ? '—' : r.checkInTime || '—';\n    const status = `${r.status || ''}${r.isLate ? ' (Late)' : ''}`;\n    lines.push(\n      `| ${mdCell(r.teamName)} | ${mdCell(r.employeeName)} | ${mdCell(r.date)} | ${mdCell(checkIn)} | ${mdCell(checkOut)} | ${mdCell(status)} | ${mdCell(r.mode)} | ${mdCell(r.workedDuration)} |`\n    );\n  }\n  lines.push('');\n  return lines.join('\\n');\n}\n\nfunction buildClickUpMarkdown({ rows, insights }) {\n  const rangeLabel = from === to ? from : `${from} → ${to}`;\n  const title =\n    period === 'daily'\n      ? `Daily attendance — ${from}`\n      : period === 'weekly'\n        ? `Weekly attendance — ${from} → ${to}`\n        : `Monthly attendance — ${from} → ${to}`;\n\n  const isMonthly = period === 'monthly';\n  const employeeCount = isMonthly\n    ? (insights || []).length\n    : new Set((rows || []).map((r) => r.employeeId)).size;\n\n  const parts = [\n    `## ${title}`,\n    '',\n    isMonthly\n      ? `Period: **${rangeLabel}** · Employees in view: **${employeeCount}** (summary only)`\n      : `Period: **${rangeLabel}** · Employees in view: **${employeeCount}** · Rows: **${(rows || []).length}**`,\n    '',\n  ];\n\n  if (isMonthly) {\n    parts.push(buildInsightsMarkdown(insights || []));\n  } else {\n    const MAX_DAILY_ROWS = 80;\n    const clipped = (rows || []).slice(0, MAX_DAILY_ROWS);\n    const more =\n      (rows || []).length > MAX_DAILY_ROWS\n        ? `\\n_…and ${(rows || []).length - MAX_DAILY_ROWS} more rows (see email for full detail)._\\n`\n        : '';\n    parts.push(buildDailyMarkdown(clipped));\n    if (more) parts.push(more);\n  }\n\n  parts.push('_Sent by Aidapt ALMS_');\n  return parts.join('\\n');\n}\n\nconst rangeLabel = from === to ? from : `${from} → ${to}`;\nconst subject =\n  period === 'daily'\n    ? `Daily attendance — ${from}`\n    : period === 'weekly'\n      ? `Weekly attendance — ${from} → ${to}`\n      : `Monthly attendance — ${from} → ${to}`;\n\nconst targets = [\n  {\n    label: 'Muhammad Ateeb',\n    matchers: ['ateeb'],\n    emailFallback: 'm.ateeb@aidapt.co',\n    scope: 'reportees',\n    teamHints: ['operations'],\n  },\n  {\n    label: 'Muhammad Irtaza',\n    matchers: ['irtaza'],\n    emailFallback: 's.irtaza@aidapt.co',\n    scope: 'reportees',\n    teamHints: ['data'],\n  },\n  {\n    label: 'Hitesh Mahajan',\n    matchers: ['hitesh'],\n    emailFallback: 'REPLACE_HITESH@aidapt.co',\n    scope: 'organization',\n    teamHints: [],\n  },\n];\n\nconst emails = [];\nfor (const t of targets) {\n  const report = findReport(t.matchers);\n  let rows;\n  let insights;\n  let roleLabel;\n  if (t.scope === 'organization') {\n    rows = report && report.role === 'HR Admin' ? report.rows : allRows;\n    insights = report && report.role === 'HR Admin' ? report.insights : allInsights;\n    roleLabel = 'organization';\n  } else {\n    rows = report ? report.rows || [] : [];\n    insights = report ? report.insights || [] : [];\n    roleLabel = 'team';\n    if (\n      (!(rows || []).length || (period === 'monthly' && !(insights || []).length)) &&\n      t.teamHints &&\n      t.teamHints.length\n    ) {\n      rows = filterByTeamHints(allRows, t.teamHints);\n      insights = filterByTeamHints(allInsights, t.teamHints);\n    }\n  }\n  const toEmail =\n    report && report.email && !String(report.email).startsWith('REPLACE_')\n      ? report.email\n      : t.emailFallback;\n  const toName = (report && report.name) || t.label;\n\n  if (period === 'monthly') {\n    // One email + one PDF per employee (monthly only).\n    const list = Array.isArray(insights) ? insights : [];\n    for (const insight of list) {\n      const pdf = insight.pdf;\n      if (!pdf || !pdf.contentBase64) continue;\n      emails.push({\n        channel: 'email',\n        to: toEmail,\n        toName,\n        subject: `Monthly attendance — ${insight.employeeName || 'Employee'} — ${rangeLabel}`,\n        html: buildMonthlyPdfCoverHtml({ toName, roleLabel, insight }),\n        period,\n        from,\n        toDate: to,\n        hasPdf: true,\n        employeeId: insight.employeeId || null,\n        employeeName: insight.employeeName || null,\n        rowCount: 1,\n        scope: roleLabel,\n        pdf: {\n          filename: pdf.filename,\n          contentBase64: pdf.contentBase64,\n          contentType: pdf.contentType || 'application/pdf',\n        },\n      });\n    }\n  } else {\n    emails.push({\n      channel: 'email',\n      to: toEmail,\n      toName,\n      subject,\n      html: buildEmailHtml({ toName, roleLabel, rows }),\n      period,\n      from,\n      toDate: to,\n      hasPdf: false,\n      rowCount: (rows || []).length,\n      scope: roleLabel,\n    });\n  }\n}\n\nconst clickupMarkdown = buildClickUpMarkdown({\n  rows: allRows,\n  insights: allInsights,\n});\n\nreturn [\n  {\n    json: {\n      period,\n      from,\n      to,\n      subject,\n      rangeLabel,\n      emails,\n      clickupMarkdown,\n      clickupTitle: subject,\n    },\n  },\n];\n"
+        "jsCode": "const payload = items[0].json;\nconst data = payload.data || payload;\nconst period = data.period || 'daily';\nconst from = data.from;\nconst to = data.to;\nconst allRows = Array.isArray(data.rows) ? data.rows : [];\nconst allInsights = Array.isArray(data.insights) ? data.insights : [];\nconst recipientReports = Array.isArray(data.recipientReports) ? data.recipientReports : [];\n\n// Aidapt brand tokens\nconst brand = {\n  navy: '#07111F',\n  teal: '#14B8A6',\n  tealDark: '#0F766E',\n  ink: '#0B1220',\n  muted: '#5B6575',\n  line: '#E6E9EF',\n  surface: '#F7F8FA',\n  white: '#FFFFFF',\n  late: '#B45309',\n  absent: '#B91C1C',\n};\n\nfunction esc(s) {\n  return String(s ?? '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n}\n\nfunction mdCell(s) {\n  return String(s ?? '—').replace(/\\|/g, '\\\\|').replace(/\\n/g, ' ');\n}\n\nfunction norm(s) {\n  return String(s || '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction findReport(matchers) {\n  return (\n    recipientReports.find((r) => {\n      const n = norm(r.name);\n      return matchers.some((m) => n.includes(m));\n    }) || null\n  );\n}\n\nfunction filterByTeamHints(rows, teamHints) {\n  if (!teamHints.length) return rows || [];\n  return (rows || []).filter((r) =>\n    teamHints.some((h) => norm(r.teamName || '').includes(h))\n  );\n}\n\nconst th = `padding:10px 12px;border-bottom:1px solid ${brand.line};text-align:left;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:${brand.muted};font-weight:600;background:${brand.surface}`;\nconst td = `padding:10px 12px;border-bottom:1px solid ${brand.line};font-size:13px;color:${brand.ink};vertical-align:top`;\nconst tdCenter = `${td};text-align:center`;\n\nfunction buildDailyHtml(rows) {\n  return (rows || [])\n    .map((r) => {\n      const checkOut =\n        r.status === 'Still checked in'\n          ? 'Still checked in'\n          : r.status === 'On Leave'\n            ? '—'\n            : r.checkOutTime || '—';\n      const checkIn = r.status === 'On Leave' ? '—' : r.checkInTime || '—';\n      const statusLabel = `${r.status || ''}${r.isLate ? ' (Late)' : ''}`;\n      const statusColor =\n        r.status === 'Absent'\n          ? brand.absent\n          : r.status === 'On Leave'\n            ? brand.tealDark\n            : r.status === 'Still checked in'\n              ? brand.late\n              : r.isLate\n                ? brand.late\n                : brand.ink;\n      return `<tr>\n  <td style=\"${td}\">${esc(r.teamName || '—')}</td>\n  <td style=\"${td}\"><strong>${esc(r.employeeName || '')}</strong></td>\n  <td style=\"${td}\">${esc(r.date)}</td>\n  <td style=\"${td}\">${esc(checkIn)}</td>\n  <td style=\"${td}\">${esc(checkOut)}</td>\n  <td style=\"${td};color:${statusColor}\">${esc(statusLabel)}</td>\n  <td style=\"${td}\">${esc(r.mode || '—')}</td>\n  <td style=\"${td}\">${esc(r.workedDuration || '—')}</td>\n</tr>`;\n    })\n    .join('');\n}\n\nfunction buildMonthlyPackageCoverHtml({ toName, roleLabel, insights }) {\n  const rangeLabel = from === to ? from : `${from} → ${to}`;\n  const list = Array.isArray(insights) ? insights : [];\n  const rowsHtml = list\n    .map((i) => {\n      const leave = i.leaveTakenLabel && i.leaveTakenLabel !== 'None' ? i.leaveTakenLabel : '—';\n      return `<tr>\n  <td style=\"${td}\"><strong>${esc(i.employeeName || '')}</strong></td>\n  <td style=\"${tdCenter}\">${i.workedDays ?? 0}</td>\n  <td style=\"${tdCenter}\">${i.expectedWorkingDays ?? 0}</td>\n  <td style=\"${tdCenter}\">${i.absentDays ?? 0}</td>\n  <td style=\"${tdCenter}\">${i.remoteDays ?? 0}</td>\n  <td style=\"${td}\">${esc(leave)}</td>\n  <td style=\"${td}\"><span style=\"font-size:12px\">${esc(i.leaveBalancesLabel || '—')}</span></td>\n  <td style=\"${td}\">${esc((i.pdf && i.pdf.filename) || '—')}</td>\n</tr>`;\n    })\n    .join('');\n\n  return `<!DOCTYPE html>\n<html lang=\"en\">\n<body style=\"margin:0;padding:0;background:${brand.surface};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${brand.surface};padding:24px 12px\">\n    <tr>\n      <td align=\"center\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:880px;background:${brand.white};border:1px solid ${brand.line};border-radius:12px;overflow:hidden\">\n          <tr>\n            <td style=\"background:${brand.navy};padding:22px 28px\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td>\n                    <div style=\"font-size:20px;font-weight:700;color:${brand.white};letter-spacing:-0.02em\">Aidapt<span style=\"color:${brand.teal}\">.</span></div>\n                    <div style=\"margin-top:4px;font-size:12px;color:rgba(255,255,255,0.65);letter-spacing:0.06em;text-transform:uppercase\">Attendance &amp; Leave · ALMS</div>\n                  </td>\n                  <td align=\"right\" style=\"color:${brand.teal};font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase\">Monthly report</td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n          <tr><td style=\"height:3px;background:${brand.teal};font-size:0;line-height:0\">&nbsp;</td></tr>\n          <tr>\n            <td style=\"padding:28px\">\n              <p style=\"margin:0 0 8px;font-size:15px;color:${brand.ink}\">Hi ${esc(toName)},</p>\n              <p style=\"margin:0 0 18px;font-size:14px;color:${brand.muted};line-height:1.55\">\n                Your <strong style=\"color:${brand.ink}\">monthly</strong> attendance package for\n                <strong style=\"color:${brand.ink}\">${esc(rangeLabel)}</strong>\n                <span style=\"color:${brand.teal}\"> · ${esc(roleLabel)} view</span>.\n                Each employee has a brand PDF attached (one file per person).\n              </p>\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden\">\n                <thead>\n                  <tr>\n                    <th style=\"${th}\">Employee</th>\n                    <th style=\"${th}\">Worked</th>\n                    <th style=\"${th}\">Expected</th>\n                    <th style=\"${th}\">Absent</th>\n                    <th style=\"${th}\">Remote</th>\n                    <th style=\"${th}\">Leave taken</th>\n                    <th style=\"${th}\">Balance</th>\n                    <th style=\"${th}\">PDF</th>\n                  </tr>\n                </thead>\n                <tbody>${rowsHtml || `<tr><td colspan=\"8\" style=\"${td};text-align:center;color:${brand.muted}\">No employees in this view.</td></tr>`}</tbody>\n              </table>\n              <p style=\"margin:14px 0 0;color:${brand.muted};font-size:12px\">\n                ${list.length} PDF${list.length === 1 ? '' : 's'} attached · Expected days = company Mon–Fri − holidays (same for all)\n              </p>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"padding:16px 28px;background:${brand.surface};border-top:1px solid ${brand.line}\">\n              <p style=\"margin:0;font-size:11px;color:${brand.muted}\">Sent by Aidapt ALMS · The operator’s AI firm · aidapt.co</p>\n            </td>\n          </tr>\n        </table>\n      </td>\n    </tr>\n  </table>\n</body>\n</html>`;\n}\n\nfunction buildEmailHtml({ toName, roleLabel, rows }) {\n  const rangeLabel = from === to ? from : `${from} → ${to}`;\n  const periodTitle = period === 'daily' ? 'Daily' : period === 'weekly' ? 'Weekly' : 'Monthly';\n  const daily = buildDailyHtml(rows);\n  const emptyDaily = `<tr>\n  <td colspan=\"8\" style=\"padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px\">\n    No attendance rows in this view. Ensure your team members are assigned under your team in AIMS.\n  </td>\n</tr>`;\n\n  return `<!DOCTYPE html>\n<html lang=\"en\">\n<body style=\"margin:0;padding:0;background:${brand.surface};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${brand.surface};padding:24px 12px\">\n    <tr>\n      <td align=\"center\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:880px;background:${brand.white};border:1px solid ${brand.line};border-radius:12px;overflow:hidden\">\n          <tr>\n            <td style=\"background:${brand.navy};padding:22px 28px\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td>\n                    <div style=\"font-size:20px;font-weight:700;color:${brand.white};letter-spacing:-0.02em\">\n                      Aidapt<span style=\"color:${brand.teal}\">.</span>\n                    </div>\n                    <div style=\"margin-top:4px;font-size:12px;color:rgba(255,255,255,0.65);letter-spacing:0.06em;text-transform:uppercase\">\n                      Attendance &amp; Leave · ALMS\n                    </div>\n                  </td>\n                  <td align=\"right\" style=\"color:${brand.teal};font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase\">\n                    ${esc(periodTitle)} report\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"height:3px;background:${brand.teal};font-size:0;line-height:0\">&nbsp;</td>\n          </tr>\n          <tr>\n            <td style=\"padding:28px\">\n              <p style=\"margin:0 0 8px;font-size:15px;color:${brand.ink}\">Hi ${esc(toName)},</p>\n              <p style=\"margin:0 0 22px;font-size:14px;color:${brand.muted};line-height:1.55\">\n                Here is your <strong style=\"color:${brand.ink}\">${esc(period)}</strong> attendance report for\n                <strong style=\"color:${brand.ink}\">${esc(rangeLabel)}</strong>\n                <span style=\"color:${brand.teal}\"> · ${esc(roleLabel)} view</span>.\n              </p>\n              <div>\n                <h2 style=\"margin:0 0 14px;font-size:16px;color:${brand.ink};font-weight:600\">Daily detail</h2>\n                <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden\">\n                  <thead>\n                    <tr>\n                      <th style=\"${th}\">Team</th>\n                      <th style=\"${th}\">Employee</th>\n                      <th style=\"${th}\">Date</th>\n                      <th style=\"${th}\">Check-in</th>\n                      <th style=\"${th}\">Check-out</th>\n                      <th style=\"${th}\">Status</th>\n                      <th style=\"${th}\">Mode</th>\n                      <th style=\"${th}\">Worked</th>\n                    </tr>\n                  </thead>\n                  <tbody>\n                    ${daily || emptyDaily}\n                  </tbody>\n                </table>\n                <p style=\"margin:14px 0 0;color:${brand.muted};font-size:12px\">\n                  ${(rows || []).length} row${(rows || []).length === 1 ? '' : 's'}\n                </p>\n              </div>\n            </td>\n          </tr>\n          <tr>\n            <td style=\"padding:16px 28px;background:${brand.surface};border-top:1px solid ${brand.line}\">\n              <p style=\"margin:0;font-size:11px;color:${brand.muted};line-height:1.5\">\n                Sent by Aidapt ALMS · The operator’s AI firm ·\n                <a href=\"https://aidapt.co\" style=\"color:${brand.tealDark};text-decoration:none\">aidapt.co</a>\n              </p>\n            </td>\n          </tr>\n        </table>\n      </td>\n    </tr>\n  </table>\n</body>\n</html>`;\n}\n\nfunction formatLeaveItemsMd(items) {\n  if (!items || !items.length) return '—';\n  return items\n    .map((it) => {\n      const type = it.leaveType || 'Leave';\n      const range =\n        it.fromDate && it.toDate && it.fromDate !== it.toDate\n          ? `${it.fromDate} → ${it.toDate}`\n          : it.fromDate || it.toDate || '—';\n      const days = it.daysInPeriod != null ? ` (${it.daysInPeriod}d)` : '';\n      return `${type} ${range}${days}`;\n    })\n    .join('; ');\n}\n\nfunction buildInsightsMarkdown(insights) {\n  if (!insights || !insights.length) return '_No monthly summary for this view._\\n';\n  const lines = [\n    '### Monthly employee summary',\n    '',\n    '_PDFs are emailed to managers (one package email per manager). Full files also attach to the ClickUp monthly task when configured._',\n    '',\n  ];\n  for (const i of insights) {\n    const probation = i.onProbation\n      ? `On probation${i.probationEndsOn ? ` (ends ${i.probationEndsOn})` : ''}`\n      : i.employmentStatus || 'Full-time';\n    const pdfName = (i.pdf && i.pdf.filename) || null;\n    lines.push(`**${mdCell(i.employeeName)}** · ${mdCell(i.teamName)} · ${mdCell(probation)}`);\n    lines.push(\n      `- Days: **${i.workedDays ?? 0}** worked / **${i.expectedWorkingDays ?? 0}** expected · Absent **${i.absentDays ?? 0}** · Remote **${i.remoteDays ?? 0}**`\n    );\n    lines.push(\n      `- Late **${i.lateCount ?? i.lateDays ?? 0}** · Strikes **${i.strikeCount ?? 0}** · Avg in/out **${mdCell(i.avgCheckInTime)} / ${mdCell(i.avgCheckOutTime)}**`\n    );\n    lines.push(\n      `- Leave taken: ${mdCell(i.leaveTakenLabel || 'None')}${\n        i.leaveItems && i.leaveItems.length ? ` · ${mdCell(formatLeaveItemsMd(i.leaveItems))}` : ''\n      }`\n    );\n    lines.push(`- Balance: ${mdCell(i.leaveBalancesLabel)}`);\n    if (pdfName) lines.push(`- PDF: \\`${mdCell(pdfName)}\\``);\n    lines.push('');\n  }\n  return lines.join('\\n');\n}\n\nfunction buildDailyMarkdown(rows) {\n  const lines = [\n    '### Daily detail',\n    '',\n    '| Team | Employee | Date | In | Out | Status | Mode | Worked |',\n    '| --- | --- | --- | --- | --- | --- | --- | --- |',\n  ];\n  for (const r of rows || []) {\n    const checkOut =\n      r.status === 'Still checked in'\n        ? 'Still checked in'\n        : r.status === 'On Leave'\n          ? '—'\n          : r.checkOutTime || '—';\n    const checkIn = r.status === 'On Leave' ? '—' : r.checkInTime || '—';\n    const status = `${r.status || ''}${r.isLate ? ' (Late)' : ''}`;\n    lines.push(\n      `| ${mdCell(r.teamName)} | ${mdCell(r.employeeName)} | ${mdCell(r.date)} | ${mdCell(checkIn)} | ${mdCell(checkOut)} | ${mdCell(status)} | ${mdCell(r.mode)} | ${mdCell(r.workedDuration)} |`\n    );\n  }\n  lines.push('');\n  return lines.join('\\n');\n}\n\nfunction buildClickUpMarkdown({ rows, insights }) {\n  const rangeLabel = from === to ? from : `${from} → ${to}`;\n  const title =\n    period === 'daily'\n      ? `Daily attendance — ${from}`\n      : period === 'weekly'\n        ? `Weekly attendance — ${from} → ${to}`\n        : `Monthly attendance — ${from} → ${to}`;\n\n  const isMonthly = period === 'monthly';\n  const employeeCount = isMonthly\n    ? (insights || []).length\n    : new Set((rows || []).map((r) => r.employeeId)).size;\n\n  const parts = [\n    `## ${title}`,\n    '',\n    isMonthly\n      ? `Period: **${rangeLabel}** · Employees in view: **${employeeCount}** (summary only)`\n      : `Period: **${rangeLabel}** · Employees in view: **${employeeCount}** · Rows: **${(rows || []).length}**`,\n    '',\n  ];\n\n  if (isMonthly) {\n    parts.push(buildInsightsMarkdown(insights || []));\n  } else {\n    const MAX_DAILY_ROWS = 80;\n    const clipped = (rows || []).slice(0, MAX_DAILY_ROWS);\n    const more =\n      (rows || []).length > MAX_DAILY_ROWS\n        ? `\\n_…and ${(rows || []).length - MAX_DAILY_ROWS} more rows (see email for full detail)._\\n`\n        : '';\n    parts.push(buildDailyMarkdown(clipped));\n    if (more) parts.push(more);\n  }\n\n  parts.push('_Sent by Aidapt ALMS_');\n  return parts.join('\\n');\n}\n\nconst rangeLabel = from === to ? from : `${from} → ${to}`;\nconst subject =\n  period === 'daily'\n    ? `Daily attendance — ${from}`\n    : period === 'weekly'\n      ? `Weekly attendance — ${from} → ${to}`\n      : `Monthly attendance — ${from} → ${to}`;\n\nconst targets = [\n  {\n    label: 'Muhammad Ateeb',\n    matchers: ['ateeb'],\n    emailFallback: 'm.ateeb@aidapt.co',\n    scope: 'reportees',\n    teamHints: ['operations'],\n  },\n  {\n    label: 'Muhammad Irtaza',\n    matchers: ['irtaza'],\n    emailFallback: 's.irtaza@aidapt.co',\n    scope: 'reportees',\n    teamHints: ['data'],\n  },\n  {\n    label: 'Hitesh Mahajan',\n    matchers: ['hitesh'],\n    emailFallback: 'REPLACE_HITESH@aidapt.co',\n    scope: 'organization',\n    teamHints: [],\n  },\n];\n\nconst emails = [];\n/** Org-wide PDFs for ClickUp task upload (monthly only). */\nconst clickupPdfs = [];\nconst pdfSeen = new Set();\n\nfor (const t of targets) {\n  const report = findReport(t.matchers);\n  let rows;\n  let insights;\n  let roleLabel;\n  if (t.scope === 'organization') {\n    rows = report && report.role === 'HR Admin' ? report.rows : allRows;\n    insights = report && report.role === 'HR Admin' ? report.insights : allInsights;\n    roleLabel = 'organization';\n  } else {\n    rows = report ? report.rows || [] : [];\n    insights = report ? report.insights || [] : [];\n    roleLabel = 'team';\n    if (\n      (!(rows || []).length || (period === 'monthly' && !(insights || []).length)) &&\n      t.teamHints &&\n      t.teamHints.length\n    ) {\n      rows = filterByTeamHints(allRows, t.teamHints);\n      insights = filterByTeamHints(allInsights, t.teamHints);\n    }\n  }\n  const toEmail =\n    report && report.email && !String(report.email).startsWith('REPLACE_')\n      ? report.email\n      : t.emailFallback;\n  const toName = (report && report.name) || t.label;\n\n  if (period === 'monthly') {\n    // ONE email per manager/HR with ALL employee PDFs attached (not 1 email per employee).\n    const list = Array.isArray(insights) ? insights.filter((i) => i && i.pdf && i.pdf.contentBase64) : [];\n    for (const i of list) {\n      const key = i.employeeId || i.pdf.filename;\n      if (!pdfSeen.has(key)) {\n        pdfSeen.add(key);\n        clickupPdfs.push({\n          employeeId: i.employeeId || null,\n          employeeName: i.employeeName || null,\n          filename: i.pdf.filename,\n          contentBase64: i.pdf.contentBase64,\n          contentType: i.pdf.contentType || 'application/pdf',\n        });\n      }\n    }\n    if (!list.length && !(insights || []).length) continue;\n    emails.push({\n      channel: 'email',\n      to: toEmail,\n      toName,\n      subject,\n      html: buildMonthlyPackageCoverHtml({ toName, roleLabel, insights: list }),\n      period,\n      from,\n      toDate: to,\n      hasPdf: list.length > 0,\n      pdfCount: list.length,\n      rowCount: list.length,\n      scope: roleLabel,\n      // Multiple PDFs for Graph sendMail\n      attachments: list.map((i) => ({\n        filename: i.pdf.filename,\n        contentBase64: i.pdf.contentBase64,\n        contentType: i.pdf.contentType || 'application/pdf',\n        employeeId: i.employeeId || null,\n        employeeName: i.employeeName || null,\n      })),\n    });\n  } else {\n    emails.push({\n      channel: 'email',\n      to: toEmail,\n      toName,\n      subject,\n      html: buildEmailHtml({ toName, roleLabel, rows }),\n      period,\n      from,\n      toDate: to,\n      hasPdf: false,\n      pdfCount: 0,\n      attachments: [],\n      rowCount: (rows || []).length,\n      scope: roleLabel,\n    });\n  }\n}\n\nconst clickupMarkdown = buildClickUpMarkdown({\n  rows: allRows,\n  insights: allInsights,\n});\n\nreturn [\n  {\n    json: {\n      period,\n      from,\n      to,\n      subject,\n      rangeLabel,\n      emails,\n      clickupMarkdown,\n      clickupTitle: subject,\n      // Used by monthly workflow to create a ClickUp task + attach PDFs\n      clickupPdfs,\n      clickupTaskName: `Monthly attendance PDFs — ${rangeLabel}`,\n    },\n  },\n];\n"
       },
-      "id": "format-monthly-001",
+      "id": "format-001",
       "name": "Format PDF emails + ClickUp",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        660,
-        400
+        580,
+        360
       ]
     },
     {
@@ -208,111 +208,49 @@
         "fieldToSplitOut": "emails",
         "options": {}
       },
-      "id": "split-emails-monthly-001",
+      "id": "split-emails-001",
       "name": "Split Out emails",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
       "position": [
-        900,
-        280
+        820,
+        200
       ]
     },
     {
       "parameters": {
-        "jsCode": "// Convert monthly PDF base64 → n8n binary for Outlook attachment.\nconst results = [];\nfor (const item of $input.all()) {\n  const j = { ...item.json };\n  const pdf = j.pdf;\n  delete j.pdf;\n  if (pdf && pdf.contentBase64) {\n    results.push({\n      json: { ...j, hasPdf: true },\n      binary: {\n        pdf: {\n          data: pdf.contentBase64,\n          fileName: pdf.filename || 'monthly.pdf',\n          mimeType: pdf.contentType || 'application/pdf',\n        },\n      },\n    });\n  } else {\n    results.push({ json: { ...j, hasPdf: false } });\n  }\n}\nreturn results;"
+        "jsCode": "// Build Microsoft Graph /me/sendMail body with multi-PDF attachments.\n// One package email per manager (not one email per employee).\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  const attachments = (j.attachments || []).map((a) => ({\n    '@odata.type': '#microsoft.graph.fileAttachment',\n    name: a.filename || 'monthly.pdf',\n    contentType: a.contentType || 'application/pdf',\n    contentBytes: a.contentBase64,\n  }));\n  out.push({\n    json: {\n      to: j.to,\n      subject: j.subject,\n      pdfCount: attachments.length,\n      graphBody: {\n        message: {\n          subject: j.subject,\n          body: {\n            contentType: 'HTML',\n            content: j.html || ' ',\n          },\n          toRecipients: [\n            {\n              emailAddress: { address: j.to },\n            },\n          ],\n          attachments,\n        },\n        saveToSentItems: true,\n      },\n    },\n  });\n}\nreturn out;"
       },
-      "id": "prep-pdf-monthly-001",
-      "name": "Prepare PDF binary",
+      "id": "graph-body-001",
+      "name": "Build Graph sendMail body",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1140,
-        280
+        1060,
+        200
       ]
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "cond-has-pdf",
-              "leftValue": "={{ $json.hasPdf }}",
-              "rightValue": true,
-              "operator": {
-                "type": "boolean",
-                "operation": "equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-has-pdf-monthly-001",
-      "name": "IF has PDF",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        1380,
-        280
-      ]
-    },
-    {
-      "parameters": {
-        "toRecipients": "={{ $json.to }}",
-        "subject": "={{ $json.subject }}",
-        "bodyContent": "={{ $json.html }}",
-        "additionalFields": {
-          "bodyContentType": "html",
-          "attachments": {
-            "attachments": [
-              {
-                "binaryPropertyName": "pdf"
-              }
-            ]
-          }
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/me/sendMail",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "microsoftOutlookOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.graphBody }}",
+        "options": {
+          "timeout": 120000
         }
       },
-      "id": "outlook-pdf-monthly-001",
-      "name": "Send via Outlook (PDF)",
-      "type": "n8n-nodes-base.microsoftOutlook",
-      "typeVersion": 2,
+      "id": "graph-send-001",
+      "name": "Send package email (Graph)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
-        1620,
-        160
+        1300,
+        200
       ],
-      "webhookId": "aims-monthly-outlook-pdf",
-      "credentials": {
-        "microsoftOutlookOAuth2Api": {
-          "id": "m9WTLZOWpRKaVwEa",
-          "name": "Sofi"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "toRecipients": "={{ $json.to }}",
-        "subject": "={{ $json.subject }}",
-        "bodyContent": "={{ $json.html }}",
-        "additionalFields": {
-          "bodyContentType": "html"
-        }
-      },
-      "id": "outlook-html-monthly-001",
-      "name": "Send via Outlook (no PDF fallback)",
-      "type": "n8n-nodes-base.microsoftOutlook",
-      "typeVersion": 2,
-      "position": [
-        1620,
-        400
-      ],
-      "webhookId": "aims-monthly-outlook-html",
       "credentials": {
         "microsoftOutlookOAuth2Api": {
           "id": "m9WTLZOWpRKaVwEa",
@@ -343,18 +281,134 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ type: 'message', content_format: 'text/md', content: $json.clickupMarkdown }) }}",
+        "jsonBody": "={{ JSON.stringify({ type: 'message', content_format: 'text/md', content: $json.clickupMarkdown + '\\n\\n_PDFs emailed to managers. Full PDFs also land on the monthly ClickUp task when CLICKUP_MONTHLY_LIST_ID is set._' }) }}",
         "options": {
           "timeout": 60000
         }
       },
-      "id": "clickup-monthly-001",
-      "name": "Post markdown to ClickUp Channel",
+      "id": "clickup-chat-001",
+      "name": "Post digest to ClickUp Chat",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        900,
-        560
+        820,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-list",
+              "leftValue": "={{ $env.CLICKUP_MONTHLY_LIST_ID }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-clickup-list-001",
+      "name": "IF ClickUp list configured",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        820,
+        680
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.clickup.com/api/v2/list/{{ $env.CLICKUP_MONTHLY_LIST_ID }}/task",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $env.CLICKUP_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: $json.clickupTaskName || $json.subject, markdown_description: $json.clickupMarkdown, status: 'to do' }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "create-clickup-task-001",
+      "name": "Create ClickUp task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1060,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Emit one item per org PDF for ClickUp task attachment upload.\nconst root = $('Format PDF emails + ClickUp').first().json;\nconst pdfs = Array.isArray(root.clickupPdfs) ? root.clickupPdfs : [];\nconst taskId = $json.id || $json.task_id || null;\nif (!taskId) {\n  throw new Error('ClickUp task id missing — create task first');\n}\nif (!pdfs.length) {\n  return [{ json: { skipped: true, reason: 'no_pdfs', taskId } }];\n}\nreturn pdfs.map((p) => ({\n  json: {\n    taskId,\n    filename: p.filename,\n    contentBase64: p.contentBase64,\n    contentType: p.contentType || 'application/pdf',\n    employeeName: p.employeeName || null,\n  },\n  binary: {\n    data: {\n      data: p.contentBase64,\n      fileName: p.filename || 'monthly.pdf',\n      mimeType: p.contentType || 'application/pdf',\n    },\n  },\n}));"
+      },
+      "id": "prep-cu-pdfs-001",
+      "name": "Prepare ClickUp PDF items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.clickup.com/api/v2/task/{{ $json.taskId }}/attachment",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $env.CLICKUP_API_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "attachment",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "upload-cu-pdf-001",
+      "name": "Upload PDF to ClickUp task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        640
       ]
     }
   ],
@@ -456,7 +510,12 @@
             "index": 0
           },
           {
-            "node": "Post markdown to ClickUp Channel",
+            "node": "Post digest to ClickUp Chat",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF ClickUp list configured",
             "type": "main",
             "index": 0
           }
@@ -467,36 +526,52 @@
       "main": [
         [
           {
-            "node": "Prepare PDF binary",
+            "node": "Build Graph sendMail body",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Prepare PDF binary": {
+    "Build Graph sendMail body": {
       "main": [
         [
           {
-            "node": "IF has PDF",
+            "node": "Send package email (Graph)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "IF has PDF": {
+    "IF ClickUp list configured": {
       "main": [
         [
           {
-            "node": "Send via Outlook (PDF)",
+            "node": "Create ClickUp task",
             "type": "main",
             "index": 0
           }
         ],
+        []
+      ]
+    },
+    "Create ClickUp task": {
+      "main": [
         [
           {
-            "node": "Send via Outlook (no PDF fallback)",
+            "node": "Prepare ClickUp PDF items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare ClickUp PDF items": {
+      "main": [
+        [
+          {
+            "node": "Upload PDF to ClickUp task",
             "type": "main",
             "index": 0
           }

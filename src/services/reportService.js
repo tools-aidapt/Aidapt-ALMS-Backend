@@ -474,19 +474,14 @@ async function loadShiftById(employees) {
 }
 
 /**
- * Per-employee monthly insights from daily report rows + shift calendar.
- * Expected days/hours = scheduled working days (shift days − holidays − leave) × shift length.
+ * Per-employee monthly insights from daily report rows + company calendar.
  *
- * @param {object} employee
- * @param {Array<object>} empRows
- * @param {{
- *   holidaySet: Set<string>,
- *   leaveSet: Set<string>,
- *   shift: object|null,
- *   leaveMeta?: object,
- *   leaveBalances?: {annual:number,sick:number,casual:number}|null,
- *   strikeInfo?: {lateCount:number,strikeCount:number,items:Array}|null,
- * }} opts
+ * Expected working days are the **same for everyone** in the month:
+ * company Mon–Fri days in range − public holidays (leave does NOT reduce expected).
+ * Leave taken is reported separately with remaining balances.
+ *
+ * Worked days = onsite + remote days (both count as working days), plus
+ * still-checked-in / present without a mode / Half Day.
  */
 function buildEmployeeMonthlyInsight(employee, empRows, opts) {
   const {
@@ -497,20 +492,17 @@ function buildEmployeeMonthlyInsight(employee, empRows, opts) {
     leaveBalances = null,
     strikeInfo = null,
   } = opts;
-  const workingDays = new Set(
-    shift && shift.fields.WorkingDays && shift.fields.WorkingDays.length
-      ? shift.fields.WorkingDays
-      : DEFAULT_WORKING_DAYS
-  );
+  // Shift length only (for hours). Expected *days* use org Mon–Fri, not per-person leave.
   const shiftHours = shiftLengthHours(shift);
   const shiftMinutes = shiftHours == null ? null : Math.round(shiftHours * 60);
+  const companyWorkingDays = new Set(DEFAULT_WORKING_DAYS);
 
   let expectedWorkingDays = 0;
   for (const row of empRows) {
     const d = row.date;
     if (holidaySet.has(d)) continue;
-    if (leaveSet.has(d) || row.status === 'On Leave') continue;
-    if (!workingDays.has(dowForDateStr(d))) continue;
+    if (row.status === 'Holiday') continue;
+    if (!companyWorkingDays.has(dowForDateStr(d))) continue;
     expectedWorkingDays += 1;
   }
 
@@ -523,6 +515,7 @@ function buildEmployeeMonthlyInsight(employee, empRows, opts) {
   let onsiteDays = 0;
   let remoteDays = 0;
   let presentDays = 0;
+  let halfDays = 0;
   let absentDays = 0;
   let leaveDays = 0;
   let holidayDays = 0;
@@ -531,6 +524,8 @@ function buildEmployeeMonthlyInsight(employee, empRows, opts) {
   let noRecordDays = 0;
   const checkInTimes = [];
   const checkOutTimes = [];
+  /** Unique dates counted as "worked" (office + remote both qualify). */
+  const workedDayDates = new Set();
 
   for (const row of empRows) {
     if (row.workedMinutes != null) workedMinutes += Number(row.workedMinutes) || 0;
@@ -545,9 +540,15 @@ function buildEmployeeMonthlyInsight(employee, empRows, opts) {
     if (row.checkInTime) checkInTimes.push(row.checkInTime);
     if (row.checkOutTime) checkOutTimes.push(row.checkOutTime);
 
-    switch (row.status) {
+    const status = row.status || '';
+    switch (status) {
       case 'Present':
         presentDays += 1;
+        workedDayDates.add(row.date);
+        break;
+      case 'Half Day':
+        halfDays += 1;
+        workedDayDates.add(row.date);
         break;
       case 'Absent':
         absentDays += 1;
@@ -560,6 +561,7 @@ function buildEmployeeMonthlyInsight(employee, empRows, opts) {
         break;
       case 'Still checked in':
         stillCheckedInDays += 1;
+        workedDayDates.add(row.date);
         break;
       case 'No record':
         noRecordDays += 1;
@@ -567,22 +569,31 @@ function buildEmployeeMonthlyInsight(employee, empRows, opts) {
       default:
         break;
     }
+
+    // Office + Remote always count as a working day (even if status is unusual).
+    if (row.mode === 'Office' || row.mode === 'Remote') {
+      if (status !== 'On Leave' && status !== 'Holiday') {
+        workedDayDates.add(row.date);
+      }
+    }
+  }
+
+  // Prefer leave meta day count when rows don't all mark "On Leave".
+  if (leaveSet && leaveSet.size > leaveDays) {
+    leaveDays = leaveSet.size;
   }
 
   const workedHours = round2(workedMinutes / 60);
   const varianceMinutes = expectedMinutes == null ? null : workedMinutes - expectedMinutes;
   const varianceHours = varianceMinutes == null ? null : round2(varianceMinutes / 60);
-  // Days the employee actually showed up (present or still checked in).
-  const workedDays = presentDays + stillCheckedInDays;
+  // Worked = unique days present in office or remote (remote counts as work).
+  const workedDays = workedDayDates.size;
   const avgCheckInTime = averageHm(checkInTimes);
   const avgCheckOutTime = averageHm(checkOutTimes);
   const probation = probationFromEmployee(employee);
   const balances = leaveBalances || { annual: 0, sick: 0, casual: 0 };
   const taken = leaveMeta.taken || { annual: 0, sick: 0, casual: 0 };
-  const strikeCount = strikeInfo
-    ? Number(strikeInfo.strikeCount || 0)
-    : 0;
-  // Prefer stored strike lateCount when present; else fall back to row-derived lateDays.
+  const strikeCount = strikeInfo ? Number(strikeInfo.strikeCount || 0) : 0;
   const lateCount =
     strikeInfo && strikeInfo.lateCount != null ? Number(strikeInfo.lateCount) : lateDays;
 
@@ -596,6 +607,7 @@ function buildEmployeeMonthlyInsight(employee, empRows, opts) {
     workedDays,
     expectedWorkingDays,
     presentDays,
+    halfDays,
     absentDays,
     leaveDays,
     holidayDays,

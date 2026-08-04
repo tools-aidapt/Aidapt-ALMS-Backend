@@ -1,31 +1,28 @@
 'use strict';
 
 /**
- * Build a standalone monthly PDF report workflow for n8n import.
- *
+ * Standalone monthly PDF report workflow for n8n import.
  * Output: n8n/aims-monthly-report-outlook.json
  *
- * Flow:
- *   Cron 1st 08:15 PKT (previous month)
- *   Manual (previous month, force) / Manual July sample
- *     → Call AIMS attendance-report (period=monthly)
- *     → Format one email + PDF per employee
- *     → Prepare binary → Send via Outlook (PDF attachment)
- *     → ClickUp markdown summary
+ * Fixes:
+ *  - ONE email per manager/HR (all PDFs attached) — not 1 email per employee
+ *  - Graph sendMail for multi-attachment reliability
+ *  - ClickUp: short channel digest + optional task with PDF attachments
+ *    (Chat API cannot attach files — use CLICKUP_MONTHLY_LIST_ID for PDFs)
  */
 
 const fs = require('fs');
 const path = require('path');
 
 const formatCode = fs.readFileSync(path.join('n8n', '_format-report-code.js'), 'utf8');
-new Function('items', formatCode); // syntax check
+new Function('items', formatCode);
 
 const PREV_MONTH_CODE = `// Previous calendar month bounds in PKT (UTC+5, no DST).
 const now = new Date();
 const pktMs = now.getTime() + 5 * 60 * 60 * 1000;
 const pkt = new Date(pktMs);
 const y = pkt.getUTCFullYear();
-const m = pkt.getUTCMonth(); // 0-based month of "today" in PKT
+const m = pkt.getUTCMonth();
 const prev = new Date(Date.UTC(y, m - 1, 1));
 const last = new Date(Date.UTC(prev.getUTCFullYear(), prev.getUTCMonth() + 1, 0)).getUTCDate();
 const pad = (n) => String(n).padStart(2, '0');
@@ -33,28 +30,69 @@ const from = \`\${prev.getUTCFullYear()}-\${pad(prev.getUTCMonth() + 1)}-01\`;
 const to = \`\${prev.getUTCFullYear()}-\${pad(prev.getUTCMonth() + 1)}-\${pad(last)}\`;
 return [{ json: { period: 'monthly', from, to, force: $json.force === true } }];`;
 
-const PREP_PDF_CODE = `// Convert monthly PDF base64 → n8n binary for Outlook attachment.
-const results = [];
+const GRAPH_BODY_CODE = `// Build Microsoft Graph /me/sendMail body with multi-PDF attachments.
+// One package email per manager (not one email per employee).
+const out = [];
 for (const item of $input.all()) {
-  const j = { ...item.json };
-  const pdf = j.pdf;
-  delete j.pdf;
-  if (pdf && pdf.contentBase64) {
-    results.push({
-      json: { ...j, hasPdf: true },
-      binary: {
-        pdf: {
-          data: pdf.contentBase64,
-          fileName: pdf.filename || 'monthly.pdf',
-          mimeType: pdf.contentType || 'application/pdf',
+  const j = item.json;
+  const attachments = (j.attachments || []).map((a) => ({
+    '@odata.type': '#microsoft.graph.fileAttachment',
+    name: a.filename || 'monthly.pdf',
+    contentType: a.contentType || 'application/pdf',
+    contentBytes: a.contentBase64,
+  }));
+  out.push({
+    json: {
+      to: j.to,
+      subject: j.subject,
+      pdfCount: attachments.length,
+      graphBody: {
+        message: {
+          subject: j.subject,
+          body: {
+            contentType: 'HTML',
+            content: j.html || ' ',
+          },
+          toRecipients: [
+            {
+              emailAddress: { address: j.to },
+            },
+          ],
+          attachments,
         },
+        saveToSentItems: true,
       },
-    });
-  } else {
-    results.push({ json: { ...j, hasPdf: false } });
-  }
+    },
+  });
 }
-return results;`;
+return out;`;
+
+const PREP_CLICKUP_PDFS = `// Emit one item per org PDF for ClickUp task attachment upload.
+const root = $('Format PDF emails + ClickUp').first().json;
+const pdfs = Array.isArray(root.clickupPdfs) ? root.clickupPdfs : [];
+const taskId = $json.id || $json.task_id || null;
+if (!taskId) {
+  throw new Error('ClickUp task id missing — create task first');
+}
+if (!pdfs.length) {
+  return [{ json: { skipped: true, reason: 'no_pdfs', taskId } }];
+}
+return pdfs.map((p) => ({
+  json: {
+    taskId,
+    filename: p.filename,
+    contentBase64: p.contentBase64,
+    contentType: p.contentType || 'application/pdf',
+    employeeName: p.employeeName || null,
+  },
+  binary: {
+    data: {
+      data: p.contentBase64,
+      fileName: p.filename || 'monthly.pdf',
+      mimeType: p.contentType || 'application/pdf',
+    },
+  },
+}));`;
 
 const outlookCreds = {
   microsoftOutlookOAuth2Api: {
@@ -69,7 +107,7 @@ const workflow = {
     templateCredsSetupCompleted: true,
     instanceId: '3995614c53330b8235732b6439f4722022fa77b84f9cd17e44c49abe50c94c1f',
     description:
-      'Monthly only: one PDF per employee emailed via Outlook, markdown summary to ClickUp. Cron runs 1st of month 08:15 PKT for the previous month.',
+      'Monthly: one package email per manager/HR with all employee PDFs attached. Short markdown to ClickUp Chat; PDFs uploaded to a ClickUp task when CLICKUP_MONTHLY_LIST_ID is set.',
   },
   settings: {
     executionOrder: 'v1',
@@ -78,7 +116,6 @@ const workflow = {
   active: false,
   pinData: {},
   nodes: [
-    // ── Triggers ──────────────────────────────────────────────────────────
     {
       parameters: {
         rule: {
@@ -89,15 +126,15 @@ const workflow = {
       name: 'Cron 1st 08:15 PKT',
       type: 'n8n-nodes-base.scheduleTrigger',
       typeVersion: 1.2,
-      position: [-320, 200],
+      position: [-400, 160],
     },
     {
       parameters: {},
-      id: 'manual-prev-month-001',
+      id: 'manual-prev-001',
       name: 'Manual — previous month',
       type: 'n8n-nodes-base.manualTrigger',
       typeVersion: 1,
-      position: [-320, 420],
+      position: [-400, 360],
     },
     {
       parameters: {},
@@ -105,16 +142,12 @@ const workflow = {
       name: 'Manual — July 2026 sample',
       type: 'n8n-nodes-base.manualTrigger',
       typeVersion: 1,
-      position: [-320, 640],
+      position: [-400, 560],
     },
-
-    // ── Period resolution ─────────────────────────────────────────────────
     {
       parameters: {
         assignments: {
-          assignments: [
-            { id: 'f1', name: 'force', value: false, type: 'boolean' },
-          ],
+          assignments: [{ id: 'f1', name: 'force', value: false, type: 'boolean' }],
         },
         options: {},
       },
@@ -122,14 +155,12 @@ const workflow = {
       name: 'force = false',
       type: 'n8n-nodes-base.set',
       typeVersion: 3.4,
-      position: [-80, 200],
+      position: [-160, 160],
     },
     {
       parameters: {
         assignments: {
-          assignments: [
-            { id: 'f2', name: 'force', value: true, type: 'boolean' },
-          ],
+          assignments: [{ id: 'f2', name: 'force', value: true, type: 'boolean' }],
         },
         options: {},
       },
@@ -137,15 +168,15 @@ const workflow = {
       name: 'force = true',
       type: 'n8n-nodes-base.set',
       typeVersion: 3.4,
-      position: [-80, 420],
+      position: [-160, 360],
     },
     {
       parameters: { jsCode: PREV_MONTH_CODE },
-      id: 'prev-month-bounds-001',
+      id: 'prev-bounds-001',
       name: 'Previous month bounds',
       type: 'n8n-nodes-base.code',
       typeVersion: 2,
-      position: [160, 300],
+      position: [80, 260],
     },
     {
       parameters: {
@@ -159,14 +190,12 @@ const workflow = {
         },
         options: {},
       },
-      id: 'july-2026-set-001',
+      id: 'july-set-001',
       name: 'Period = July 2026 monthly',
       type: 'n8n-nodes-base.set',
       typeVersion: 3.4,
-      position: [160, 640],
+      position: [80, 560],
     },
-
-    // ── Backend + format ──────────────────────────────────────────────────
     {
       parameters: {
         method: 'POST',
@@ -175,7 +204,6 @@ const workflow = {
         headerParameters: {
           parameters: [
             { name: 'Content-Type', value: 'application/json' },
-            // Replace with your JOBS_SECRET (same value as X-Job-Secret on the API).
             { name: 'X-Job-Secret', value: '1a2b3c4d5e6f7g8h9i0j' },
           ],
         },
@@ -185,111 +213,64 @@ const workflow = {
           "={{ JSON.stringify({ period: 'monthly', from: $json.from, to: $json.to, force: $json.force === true }) }}",
         options: {
           response: { response: {} },
-          // PDF generation for full month can exceed 2 minutes.
           timeout: 300000,
         },
       },
-      id: 'call-aims-monthly-001',
+      id: 'call-aims-001',
       name: 'Call AIMS monthly report',
       type: 'n8n-nodes-base.httpRequest',
       typeVersion: 4.2,
-      position: [420, 400],
+      position: [340, 360],
     },
     {
       parameters: { jsCode: formatCode },
-      id: 'format-monthly-001',
+      id: 'format-001',
       name: 'Format PDF emails + ClickUp',
       type: 'n8n-nodes-base.code',
       typeVersion: 2,
-      position: [660, 400],
+      position: [580, 360],
     },
 
-    // ── Email path ────────────────────────────────────────────────────────
+    // ── Email: package per manager ────────────────────────────────────────
     {
       parameters: {
         fieldToSplitOut: 'emails',
         options: {},
       },
-      id: 'split-emails-monthly-001',
+      id: 'split-emails-001',
       name: 'Split Out emails',
       type: 'n8n-nodes-base.splitOut',
       typeVersion: 1,
-      position: [900, 280],
+      position: [820, 200],
     },
     {
-      parameters: { jsCode: PREP_PDF_CODE },
-      id: 'prep-pdf-monthly-001',
-      name: 'Prepare PDF binary',
+      parameters: { jsCode: GRAPH_BODY_CODE },
+      id: 'graph-body-001',
+      name: 'Build Graph sendMail body',
       type: 'n8n-nodes-base.code',
       typeVersion: 2,
-      position: [1140, 280],
+      position: [1060, 200],
     },
     {
       parameters: {
-        conditions: {
-          options: {
-            caseSensitive: true,
-            leftValue: '',
-            typeValidation: 'strict',
-            version: 2,
-          },
-          conditions: [
-            {
-              id: 'cond-has-pdf',
-              leftValue: '={{ $json.hasPdf }}',
-              rightValue: true,
-              operator: { type: 'boolean', operation: 'equals' },
-            },
-          ],
-          combinator: 'and',
-        },
-        options: {},
+        method: 'POST',
+        url: 'https://graph.microsoft.com/v1.0/me/sendMail',
+        authentication: 'predefinedCredentialType',
+        nodeCredentialType: 'microsoftOutlookOAuth2Api',
+        sendBody: true,
+        specifyBody: 'json',
+        jsonBody: '={{ $json.graphBody }}',
+        options: { timeout: 120000 },
       },
-      id: 'if-has-pdf-monthly-001',
-      name: 'IF has PDF',
-      type: 'n8n-nodes-base.if',
-      typeVersion: 2.2,
-      position: [1380, 280],
-    },
-    {
-      parameters: {
-        toRecipients: '={{ $json.to }}',
-        subject: '={{ $json.subject }}',
-        bodyContent: '={{ $json.html }}',
-        additionalFields: {
-          bodyContentType: 'html',
-          attachments: {
-            attachments: [{ binaryPropertyName: 'pdf' }],
-          },
-        },
-      },
-      id: 'outlook-pdf-monthly-001',
-      name: 'Send via Outlook (PDF)',
-      type: 'n8n-nodes-base.microsoftOutlook',
-      typeVersion: 2,
-      position: [1620, 160],
-      webhookId: 'aims-monthly-outlook-pdf',
-      credentials: outlookCreds,
-    },
-    {
-      parameters: {
-        toRecipients: '={{ $json.to }}',
-        subject: '={{ $json.subject }}',
-        bodyContent: '={{ $json.html }}',
-        additionalFields: {
-          bodyContentType: 'html',
-        },
-      },
-      id: 'outlook-html-monthly-001',
-      name: 'Send via Outlook (no PDF fallback)',
-      type: 'n8n-nodes-base.microsoftOutlook',
-      typeVersion: 2,
-      position: [1620, 400],
-      webhookId: 'aims-monthly-outlook-html',
+      id: 'graph-send-001',
+      name: 'Send package email (Graph)',
+      type: 'n8n-nodes-base.httpRequest',
+      typeVersion: 4.2,
+      position: [1300, 200],
       credentials: outlookCreds,
     },
 
-    // ── ClickUp ───────────────────────────────────────────────────────────
+    // ── ClickUp Chat digest (markdown only — API cannot attach files here) ─
     {
       parameters: {
         method: 'POST',
@@ -305,14 +286,101 @@ const workflow = {
         sendBody: true,
         specifyBody: 'json',
         jsonBody:
-          "={{ JSON.stringify({ type: 'message', content_format: 'text/md', content: $json.clickupMarkdown }) }}",
+          "={{ JSON.stringify({ type: 'message', content_format: 'text/md', content: $json.clickupMarkdown + '\\n\\n_PDFs emailed to managers. Full PDFs also land on the monthly ClickUp task when CLICKUP_MONTHLY_LIST_ID is set._' }) }}",
         options: { timeout: 60000 },
       },
-      id: 'clickup-monthly-001',
-      name: 'Post markdown to ClickUp Channel',
+      id: 'clickup-chat-001',
+      name: 'Post digest to ClickUp Chat',
       type: 'n8n-nodes-base.httpRequest',
       typeVersion: 4.2,
-      position: [900, 560],
+      position: [820, 480],
+    },
+
+    // ── ClickUp task + PDF attachments (optional via env list id) ─────────
+    {
+      parameters: {
+        conditions: {
+          options: {
+            caseSensitive: true,
+            leftValue: '',
+            typeValidation: 'loose',
+            version: 2,
+          },
+          conditions: [
+            {
+              id: 'has-list',
+              leftValue: '={{ $env.CLICKUP_MONTHLY_LIST_ID }}',
+              rightValue: '',
+              operator: { type: 'string', operation: 'notEmpty' },
+            },
+          ],
+          combinator: 'and',
+        },
+        options: {},
+      },
+      id: 'if-clickup-list-001',
+      name: 'IF ClickUp list configured',
+      type: 'n8n-nodes-base.if',
+      typeVersion: 2.2,
+      position: [820, 680],
+    },
+    {
+      parameters: {
+        method: 'POST',
+        url: '=https://api.clickup.com/api/v2/list/{{ $env.CLICKUP_MONTHLY_LIST_ID }}/task',
+        sendHeaders: true,
+        headerParameters: {
+          parameters: [
+            { name: 'Authorization', value: '={{ $env.CLICKUP_API_TOKEN }}' },
+            { name: 'Content-Type', value: 'application/json' },
+          ],
+        },
+        sendBody: true,
+        specifyBody: 'json',
+        jsonBody:
+          "={{ JSON.stringify({ name: $json.clickupTaskName || $json.subject, markdown_description: $json.clickupMarkdown, status: 'to do' }) }}",
+        options: { timeout: 60000 },
+      },
+      id: 'create-clickup-task-001',
+      name: 'Create ClickUp task',
+      type: 'n8n-nodes-base.httpRequest',
+      typeVersion: 4.2,
+      position: [1060, 640],
+    },
+    {
+      parameters: { jsCode: PREP_CLICKUP_PDFS },
+      id: 'prep-cu-pdfs-001',
+      name: 'Prepare ClickUp PDF items',
+      type: 'n8n-nodes-base.code',
+      typeVersion: 2,
+      position: [1300, 640],
+    },
+    {
+      parameters: {
+        method: 'POST',
+        url: '=https://api.clickup.com/api/v2/task/{{ $json.taskId }}/attachment',
+        sendHeaders: true,
+        headerParameters: {
+          parameters: [{ name: 'Authorization', value: '={{ $env.CLICKUP_API_TOKEN }}' }],
+        },
+        sendBody: true,
+        contentType: 'multipart-form-data',
+        bodyParameters: {
+          parameters: [
+            {
+              parameterType: 'formBinaryData',
+              name: 'attachment',
+              inputDataFieldName: 'data',
+            },
+          ],
+        },
+        options: { timeout: 120000 },
+      },
+      id: 'upload-cu-pdf-001',
+      name: 'Upload PDF to ClickUp task',
+      type: 'n8n-nodes-base.httpRequest',
+      typeVersion: 4.2,
+      position: [1540, 640],
     },
   ],
   connections: {
@@ -344,21 +412,25 @@ const workflow = {
       main: [
         [
           { node: 'Split Out emails', type: 'main', index: 0 },
-          { node: 'Post markdown to ClickUp Channel', type: 'main', index: 0 },
+          { node: 'Post digest to ClickUp Chat', type: 'main', index: 0 },
+          { node: 'IF ClickUp list configured', type: 'main', index: 0 },
         ],
       ],
     },
     'Split Out emails': {
-      main: [[{ node: 'Prepare PDF binary', type: 'main', index: 0 }]],
+      main: [[{ node: 'Build Graph sendMail body', type: 'main', index: 0 }]],
     },
-    'Prepare PDF binary': {
-      main: [[{ node: 'IF has PDF', type: 'main', index: 0 }]],
+    'Build Graph sendMail body': {
+      main: [[{ node: 'Send package email (Graph)', type: 'main', index: 0 }]],
     },
-    'IF has PDF': {
-      main: [
-        [{ node: 'Send via Outlook (PDF)', type: 'main', index: 0 }],
-        [{ node: 'Send via Outlook (no PDF fallback)', type: 'main', index: 0 }],
-      ],
+    'IF ClickUp list configured': {
+      main: [[{ node: 'Create ClickUp task', type: 'main', index: 0 }], []],
+    },
+    'Create ClickUp task': {
+      main: [[{ node: 'Prepare ClickUp PDF items', type: 'main', index: 0 }]],
+    },
+    'Prepare ClickUp PDF items': {
+      main: [[{ node: 'Upload PDF to ClickUp task', type: 'main', index: 0 }]],
     },
   },
 };
@@ -366,5 +438,6 @@ const workflow = {
 const outPath = path.join('n8n', 'aims-monthly-report-outlook.json');
 fs.writeFileSync(outPath, JSON.stringify(workflow, null, 2));
 console.log('wrote', outPath);
-console.log('nodes:', workflow.nodes.length);
-console.log('import in n8n: Workflows → Import from File →', outPath);
+
+// Also refresh combined workflow format code
+require('./build-n8n-workflow.js');

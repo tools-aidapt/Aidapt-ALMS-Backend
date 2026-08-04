@@ -85,25 +85,78 @@ describe('buildEmployeeMonthlyInsight', () => {
     assert.equal(insight.hoursVariance, -10);
   });
 
-  test('excludes holidays and leave from expected hours', () => {
+  test('does not reduce expected days for leave (same company calendar for all)', () => {
     const empRows = [
       row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }), // Wed
       row({ date: '2026-07-02', status: 'On Leave' }), // Thu leave
-      row({ date: '2026-07-03', status: 'Holiday' }), // Fri holiday marked
+      row({ date: '2026-07-03', status: 'Holiday' }), // Fri holiday
     ];
 
     const insight = buildEmployeeMonthlyInsight(EMP, empRows, {
       holidaySet: new Set(['2026-07-03']),
       leaveSet: new Set(['2026-07-02']),
       shift: shift9to18,
+      leaveMeta: {
+        taken: { annual: 1, sick: 0, casual: 0 },
+        items: [{ leaveType: 'Annual', fromDate: '2026-07-02', toDate: '2026-07-02', daysInPeriod: 1 }],
+      },
+      leaveBalances: { annual: 9, sick: 5, casual: 2 },
     });
 
-    assert.equal(insight.expectedWorkingDays, 1); // only Wed
-    assert.equal(insight.expectedHours, 9);
+    // Company Mon–Fri: Wed+Thu counted, Fri is holiday → 2 expected (leave does not drop it)
+    assert.equal(insight.expectedWorkingDays, 2);
     assert.equal(insight.leaveDays, 1);
     assert.equal(insight.holidayDays, 1);
-    assert.equal(insight.workedHours, 9);
-    assert.equal(insight.hoursVariance, 0);
+    assert.equal(insight.workedDays, 1);
+    assert.equal(insight.leaveTakenLabel, 'Annual 1');
+    assert.match(insight.leaveBalancesLabel, /Annual 9/);
+  });
+
+  test('remote days count as worked days', () => {
+    const empRows = [
+      row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+      row({ date: '2026-07-02', status: 'Present', mode: 'Remote', workedMinutes: 480 }),
+    ];
+
+    const insight = buildEmployeeMonthlyInsight(EMP, empRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(),
+      shift: shift9to18,
+    });
+
+    assert.equal(insight.onsiteDays, 1);
+    assert.equal(insight.remoteDays, 1);
+    assert.equal(insight.workedDays, 2);
+    assert.equal(insight.expectedWorkingDays, 2);
+  });
+
+  test('two people with different leave still share same expected days', () => {
+    const baseRows = [
+      row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+      row({ date: '2026-07-02', status: 'Present', mode: 'Remote', workedMinutes: 480 }),
+      row({ date: '2026-07-03', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+    ];
+    const alice = buildEmployeeMonthlyInsight(EMP, baseRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(),
+      shift: shift9to18,
+    });
+    const bobRows = [
+      row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+      row({ date: '2026-07-02', status: 'On Leave' }),
+      row({ date: '2026-07-03', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+    ];
+    const bob = buildEmployeeMonthlyInsight(EMP_PROBATION, bobRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(['2026-07-02']),
+      shift: shift9to18,
+    });
+
+    assert.equal(alice.expectedWorkingDays, bob.expectedWorkingDays);
+    assert.equal(alice.expectedWorkingDays, 3);
+    assert.equal(bob.leaveDays, 1);
+    assert.equal(bob.workedDays, 2);
+    assert.equal(alice.workedDays, 3);
   });
 
   test('counts late days and still-checked-in separately', () => {

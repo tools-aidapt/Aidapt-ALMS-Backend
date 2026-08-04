@@ -58,6 +58,7 @@ function filterByTeamHints(rows, teamHints) {
 
 const th = `padding:10px 12px;border-bottom:1px solid ${brand.line};text-align:left;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:${brand.muted};font-weight:600;background:${brand.surface}`;
 const td = `padding:10px 12px;border-bottom:1px solid ${brand.line};font-size:13px;color:${brand.ink};vertical-align:top`;
+const tdCenter = `${td};text-align:center`;
 
 function buildDailyHtml(rows) {
   return (rows || [])
@@ -94,45 +95,78 @@ function buildDailyHtml(rows) {
     .join('');
 }
 
-function buildMonthlyPdfCoverHtml({ toName, roleLabel, insight }) {
+function buildMonthlyPackageCoverHtml({ toName, roleLabel, insights }) {
   const rangeLabel = from === to ? from : `${from} → ${to}`;
-  const pdfName = (insight.pdf && insight.pdf.filename) || 'monthly.pdf';
+  const list = Array.isArray(insights) ? insights : [];
+  const rowsHtml = list
+    .map((i) => {
+      const leave = i.leaveTakenLabel && i.leaveTakenLabel !== 'None' ? i.leaveTakenLabel : '—';
+      return `<tr>
+  <td style="${td}"><strong>${esc(i.employeeName || '')}</strong></td>
+  <td style="${tdCenter}">${i.workedDays ?? 0}</td>
+  <td style="${tdCenter}">${i.expectedWorkingDays ?? 0}</td>
+  <td style="${tdCenter}">${i.absentDays ?? 0}</td>
+  <td style="${tdCenter}">${i.remoteDays ?? 0}</td>
+  <td style="${td}">${esc(leave)}</td>
+  <td style="${td}"><span style="font-size:12px">${esc(i.leaveBalancesLabel || '—')}</span></td>
+  <td style="${td}">${esc((i.pdf && i.pdf.filename) || '—')}</td>
+</tr>`;
+    })
+    .join('');
+
   return `<!DOCTYPE html>
 <html lang="en">
 <body style="margin:0;padding:0;background:${brand.surface};font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${brand.surface};padding:24px 12px">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:${brand.white};border:1px solid ${brand.line};border-radius:12px;overflow:hidden">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:880px;background:${brand.white};border:1px solid ${brand.line};border-radius:12px;overflow:hidden">
           <tr>
             <td style="background:${brand.navy};padding:22px 28px">
-              <div style="font-size:20px;font-weight:700;color:${brand.white}">Aidapt<span style="color:${brand.teal}">.</span></div>
-              <div style="margin-top:4px;font-size:12px;color:rgba(255,255,255,0.65);letter-spacing:0.06em;text-transform:uppercase">Attendance &amp; Leave · ALMS</div>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <div style="font-size:20px;font-weight:700;color:${brand.white};letter-spacing:-0.02em">Aidapt<span style="color:${brand.teal}">.</span></div>
+                    <div style="margin-top:4px;font-size:12px;color:rgba(255,255,255,0.65);letter-spacing:0.06em;text-transform:uppercase">Attendance &amp; Leave · ALMS</div>
+                  </td>
+                  <td align="right" style="color:${brand.teal};font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase">Monthly report</td>
+                </tr>
+              </table>
             </td>
           </tr>
           <tr><td style="height:3px;background:${brand.teal};font-size:0;line-height:0">&nbsp;</td></tr>
           <tr>
             <td style="padding:28px">
               <p style="margin:0 0 8px;font-size:15px;color:${brand.ink}">Hi ${esc(toName)},</p>
-              <p style="margin:0 0 16px;font-size:14px;color:${brand.muted};line-height:1.55">
-                Monthly attendance PDF for <strong style="color:${brand.ink}">${esc(insight.employeeName || 'employee')}</strong>
-                (${esc(insight.teamName || '—')}) · <strong style="color:${brand.ink}">${esc(rangeLabel)}</strong>
+              <p style="margin:0 0 18px;font-size:14px;color:${brand.muted};line-height:1.55">
+                Your <strong style="color:${brand.ink}">monthly</strong> attendance package for
+                <strong style="color:${brand.ink}">${esc(rangeLabel)}</strong>
                 <span style="color:${brand.teal}"> · ${esc(roleLabel)} view</span>.
+                Each employee has a brand PDF attached (one file per person).
               </p>
-              <p style="margin:0 0 8px;font-size:13px;color:${brand.ink}">
-                Worked <strong>${insight.workedDays ?? 0}</strong> / expected <strong>${insight.expectedWorkingDays ?? 0}</strong>
-                · Absent <strong>${insight.absentDays ?? 0}</strong>
-                · Late <strong>${insight.lateCount ?? insight.lateDays ?? 0}</strong>
-                · Strikes <strong>${insight.strikeCount ?? 0}</strong>
-              </p>
-              <p style="margin:0;font-size:13px;color:${brand.muted}">
-                Full details are in the attached PDF: <strong style="color:${brand.ink}">${esc(pdfName)}</strong>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
+                <thead>
+                  <tr>
+                    <th style="${th}">Employee</th>
+                    <th style="${th}">Worked</th>
+                    <th style="${th}">Expected</th>
+                    <th style="${th}">Absent</th>
+                    <th style="${th}">Remote</th>
+                    <th style="${th}">Leave taken</th>
+                    <th style="${th}">Balance</th>
+                    <th style="${th}">PDF</th>
+                  </tr>
+                </thead>
+                <tbody>${rowsHtml || `<tr><td colspan="8" style="${td};text-align:center;color:${brand.muted}">No employees in this view.</td></tr>`}</tbody>
+              </table>
+              <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
+                ${list.length} PDF${list.length === 1 ? '' : 's'} attached · Expected days = company Mon–Fri − holidays (same for all)
               </p>
             </td>
           </tr>
           <tr>
             <td style="padding:16px 28px;background:${brand.surface};border-top:1px solid ${brand.line}">
-              <p style="margin:0;font-size:11px;color:${brand.muted}">Sent by Aidapt ALMS · aidapt.co</p>
+              <p style="margin:0;font-size:11px;color:${brand.muted}">Sent by Aidapt ALMS · The operator’s AI firm · aidapt.co</p>
             </td>
           </tr>
         </table>
@@ -248,7 +282,12 @@ function formatLeaveItemsMd(items) {
 
 function buildInsightsMarkdown(insights) {
   if (!insights || !insights.length) return '_No monthly summary for this view._\n';
-  const lines = ['### Monthly employee summary', '', '_PDFs emailed one-per-employee to managers._', ''];
+  const lines = [
+    '### Monthly employee summary',
+    '',
+    '_PDFs are emailed to managers (one package email per manager). Full files also attach to the ClickUp monthly task when configured._',
+    '',
+  ];
   for (const i of insights) {
     const probation = i.onProbation
       ? `On probation${i.probationEndsOn ? ` (ends ${i.probationEndsOn})` : ''}`
@@ -256,7 +295,7 @@ function buildInsightsMarkdown(insights) {
     const pdfName = (i.pdf && i.pdf.filename) || null;
     lines.push(`**${mdCell(i.employeeName)}** · ${mdCell(i.teamName)} · ${mdCell(probation)}`);
     lines.push(
-      `- Days: **${i.workedDays ?? 0}** worked / **${i.expectedWorkingDays ?? 0}** expected · Absent **${i.absentDays ?? 0}**`
+      `- Days: **${i.workedDays ?? 0}** worked / **${i.expectedWorkingDays ?? 0}** expected · Absent **${i.absentDays ?? 0}** · Remote **${i.remoteDays ?? 0}**`
     );
     lines.push(
       `- Late **${i.lateCount ?? i.lateDays ?? 0}** · Strikes **${i.strikeCount ?? 0}** · Avg in/out **${mdCell(i.avgCheckInTime)} / ${mdCell(i.avgCheckOutTime)}**`
@@ -370,6 +409,10 @@ const targets = [
 ];
 
 const emails = [];
+/** Org-wide PDFs for ClickUp task upload (monthly only). */
+const clickupPdfs = [];
+const pdfSeen = new Set();
+
 for (const t of targets) {
   const report = findReport(t.matchers);
   let rows;
@@ -399,32 +442,44 @@ for (const t of targets) {
   const toName = (report && report.name) || t.label;
 
   if (period === 'monthly') {
-    // One email + one PDF per employee (monthly only).
-    const list = Array.isArray(insights) ? insights : [];
-    for (const insight of list) {
-      const pdf = insight.pdf;
-      if (!pdf || !pdf.contentBase64) continue;
-      emails.push({
-        channel: 'email',
-        to: toEmail,
-        toName,
-        subject: `Monthly attendance — ${insight.employeeName || 'Employee'} — ${rangeLabel}`,
-        html: buildMonthlyPdfCoverHtml({ toName, roleLabel, insight }),
-        period,
-        from,
-        toDate: to,
-        hasPdf: true,
-        employeeId: insight.employeeId || null,
-        employeeName: insight.employeeName || null,
-        rowCount: 1,
-        scope: roleLabel,
-        pdf: {
-          filename: pdf.filename,
-          contentBase64: pdf.contentBase64,
-          contentType: pdf.contentType || 'application/pdf',
-        },
-      });
+    // ONE email per manager/HR with ALL employee PDFs attached (not 1 email per employee).
+    const list = Array.isArray(insights) ? insights.filter((i) => i && i.pdf && i.pdf.contentBase64) : [];
+    for (const i of list) {
+      const key = i.employeeId || i.pdf.filename;
+      if (!pdfSeen.has(key)) {
+        pdfSeen.add(key);
+        clickupPdfs.push({
+          employeeId: i.employeeId || null,
+          employeeName: i.employeeName || null,
+          filename: i.pdf.filename,
+          contentBase64: i.pdf.contentBase64,
+          contentType: i.pdf.contentType || 'application/pdf',
+        });
+      }
     }
+    if (!list.length && !(insights || []).length) continue;
+    emails.push({
+      channel: 'email',
+      to: toEmail,
+      toName,
+      subject,
+      html: buildMonthlyPackageCoverHtml({ toName, roleLabel, insights: list }),
+      period,
+      from,
+      toDate: to,
+      hasPdf: list.length > 0,
+      pdfCount: list.length,
+      rowCount: list.length,
+      scope: roleLabel,
+      // Multiple PDFs for Graph sendMail
+      attachments: list.map((i) => ({
+        filename: i.pdf.filename,
+        contentBase64: i.pdf.contentBase64,
+        contentType: i.pdf.contentType || 'application/pdf',
+        employeeId: i.employeeId || null,
+        employeeName: i.employeeName || null,
+      })),
+    });
   } else {
     emails.push({
       channel: 'email',
@@ -436,6 +491,8 @@ for (const t of targets) {
       from,
       toDate: to,
       hasPdf: false,
+      pdfCount: 0,
+      attachments: [],
       rowCount: (rows || []).length,
       scope: roleLabel,
     });
@@ -458,6 +515,9 @@ return [
       emails,
       clickupMarkdown,
       clickupTitle: subject,
+      // Used by monthly workflow to create a ClickUp task + attach PDFs
+      clickupPdfs,
+      clickupTaskName: `Monthly attendance PDFs — ${rangeLabel}`,
     },
   },
 ];

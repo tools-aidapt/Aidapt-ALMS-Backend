@@ -2,21 +2,23 @@
 
 /**
  * One-page monthly attendance PDF for a single employee (pdfkit).
- * Used only for monthly reports — managers receive one PDF per reportee.
+ * Visual system matches ALMS email brand: navy #07111F + teal #14B8A6.
  */
 
 const PDFDocument = require('pdfkit');
 
-const COLORS = {
+// Aidapt / ALMS brand tokens (aligned with emailService)
+const BRAND = {
   navy: '#07111F',
-  teal: '#0F766E',
+  teal: '#14B8A6',
+  tealDark: '#0F766E',
   ink: '#0B1220',
   muted: '#5B6575',
   line: '#E6E9EF',
   surface: '#F7F8FA',
+  white: '#FFFFFF',
   late: '#B45309',
   absent: '#B91C1C',
-  white: '#FFFFFF',
 };
 
 function safeFilenamePart(name) {
@@ -27,30 +29,33 @@ function safeFilenamePart(name) {
     .slice(0, 60) || 'employee';
 }
 
-/**
- * @param {object} insight  monthly insight from reportService
- * @param {{from: string, to: string}} range
- * @returns {string} e.g. Alice_2026-07_monthly.pdf
- */
 function monthlyPdfFilename(insight, range) {
   const ym = String(range.from || '').slice(0, 7) || 'month';
   return `${safeFilenamePart(insight.employeeName)}_${ym}_monthly.pdf`;
 }
 
-function drawLabelValue(doc, x, y, label, value, opts = {}) {
-  const { labelColor = COLORS.muted, valueColor = COLORS.ink, valueSize = 16 } = opts;
-  doc.fontSize(8).fillColor(labelColor).text(String(label).toUpperCase(), x, y, {
-    width: opts.width || 150,
-    characterSpacing: 0.4,
-  });
+function drawMetric(doc, x, y, w, h, label, value, opts = {}) {
+  const valueColor = opts.valueColor || BRAND.ink;
+  const valueSize = opts.valueSize || 18;
+  doc.roundedRect(x, y, w, h, 4).fill(BRAND.surface);
+  // Left teal rail for brand identity
+  doc.rect(x, y, 3, h).fill(BRAND.teal);
   doc
+    .font('Helvetica')
+    .fontSize(7.5)
+    .fillColor(BRAND.muted)
+    .text(String(label).toUpperCase(), x + 12, y + 10, {
+      width: w - 20,
+      characterSpacing: 0.6,
+    });
+  doc
+    .font('Helvetica-Bold')
     .fontSize(valueSize)
     .fillColor(valueColor)
-    .text(String(value ?? '—'), x, y + 12, { width: opts.width || 150 });
+    .text(String(value ?? '—'), x + 12, y + 24, { width: w - 20 });
 }
 
 /**
- * Render a one-employee monthly PDF.
  * @param {object} insight
  * @param {{from: string, to: string}} range
  * @returns {Promise<Buffer>}
@@ -59,11 +64,12 @@ function renderEmployeeMonthlyPdf(insight, range) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
-      margin: 48,
+      margin: 0,
       info: {
         Title: `Monthly attendance — ${insight.employeeName || 'Employee'}`,
         Author: 'Aidapt ALMS',
         Subject: `${range.from} → ${range.to}`,
+        Keywords: 'Aidapt, ALMS, attendance',
       },
     });
     const chunks = [];
@@ -71,196 +77,235 @@ function renderEmployeeMonthlyPdf(insight, range) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const pageWidth = doc.page.width;
+    const pageW = doc.page.width;
+    const pageH = doc.page.height;
     const left = 48;
-    const contentWidth = pageWidth - 96;
+    const contentW = pageW - 96;
+    const rangeLabel =
+      range.from === range.to ? range.from : `${range.from} → ${range.to}`;
 
-    // Header bar
-    doc.rect(0, 0, pageWidth, 72).fill(COLORS.navy);
-    doc.rect(0, 72, pageWidth, 3).fill(COLORS.teal);
+    // ── Hero header (brand first) ─────────────────────────────────────────
+    doc.rect(0, 0, pageW, 96).fill(BRAND.navy);
+    doc.rect(0, 96, pageW, 4).fill(BRAND.teal);
+
+    // Wordmark: Aidapt.
+    doc.font('Helvetica-Bold').fontSize(22).fillColor(BRAND.white).text('Aidapt', left, 28, {
+      continued: true,
+    });
+    doc.fillColor(BRAND.teal).text('.');
     doc
-      .fillColor(COLORS.white)
-      .fontSize(20)
-      .font('Helvetica-Bold')
-      .text('Aidapt.', left, 22, { continued: false });
-    doc
-      .fontSize(9)
       .font('Helvetica')
-      .fillColor('rgba(255,255,255,0.7)')
-      .fillColor('#A8B3C4')
-      .text('Attendance & Leave · ALMS', left, 46);
+      .fontSize(9)
+      .fillColor('#9AA6B8')
+      .text('The operator’s AI firm', left, 54);
     doc
+      .fontSize(8)
+      .fillColor('#7A8799')
+      .text('Attendance & Leave · ALMS', left, 68);
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(9)
+      .fillColor(BRAND.teal)
+      .text('MONTHLY REPORT', left, 36, { width: contentW, align: 'right' });
+    doc
+      .font('Helvetica')
+      .fontSize(8)
+      .fillColor('#9AA6B8')
+      .text(rangeLabel, left, 52, { width: contentW, align: 'right' });
+
+    let y = 120;
+
+    // ── Employee name (hero of content) ───────────────────────────────────
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(20)
+      .fillColor(BRAND.ink)
+      .text(insight.employeeName || 'Employee', left, y, { width: contentW });
+    y = doc.y + 6;
+
+    const metaParts = [insight.teamName || null, rangeLabel].filter(Boolean);
+    doc
+      .font('Helvetica')
       .fontSize(10)
-      .fillColor(COLORS.teal)
-      .font('Helvetica-Bold')
-      .text('MONTHLY REPORT', left, 28, { width: contentWidth, align: 'right' });
-
-    let y = 100;
-
-    // Employee block
-    doc
-      .fontSize(18)
-      .fillColor(COLORS.ink)
-      .font('Helvetica-Bold')
-      .text(insight.employeeName || 'Employee', left, y);
-    y = doc.y + 4;
-    const teamLine = [insight.teamName, range.from === range.to ? range.from : `${range.from} → ${range.to}`]
-      .filter(Boolean)
-      .join(' · ');
-    doc.fontSize(11).font('Helvetica').fillColor(COLORS.muted).text(teamLine, left, y);
+      .fillColor(BRAND.muted)
+      .text(metaParts.join('  ·  '), left, y);
     y = doc.y + 8;
 
-    let statusLine;
     if (insight.onProbation) {
-      statusLine = `On probation${
-        insight.probationEndsOn ? ` · ends ${insight.probationEndsOn}` : ''
-      }${insight.dateOfJoining ? ` · joined ${insight.dateOfJoining}` : ''}`;
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(9)
+        .fillColor(BRAND.late)
+        .text(
+          `ON PROBATION${insight.probationEndsOn ? ` · ends ${insight.probationEndsOn}` : ''}${
+            insight.dateOfJoining ? ` · joined ${insight.dateOfJoining}` : ''
+          }`,
+          left,
+          y
+        );
+      y = doc.y + 14;
     } else {
-      statusLine = insight.employmentStatus || 'Full-time';
+      doc
+        .font('Helvetica')
+        .fontSize(9)
+        .fillColor(BRAND.muted)
+        .text(insight.employmentStatus || 'Full-time', left, y);
+      y = doc.y + 14;
     }
-    doc
-      .fontSize(10)
-      .fillColor(insight.onProbation ? COLORS.late : COLORS.muted)
-      .text(statusLine, left, y);
-    y = doc.y + 18;
 
-    // Metric cards row 1
-    const cardH = 58;
+    // Teal divider
+    doc
+      .moveTo(left, y)
+      .lineTo(left + contentW, y)
+      .lineWidth(1)
+      .strokeColor(BRAND.teal)
+      .stroke();
+    y += 16;
+
+    // ── Core metrics ──────────────────────────────────────────────────────
     const gap = 10;
-    const cardW = (contentWidth - gap * 2) / 3;
-    const cards1 = [
+    const cardH = 56;
+    const cardW = (contentW - gap * 2) / 3;
+
+    const row1 = [
       { label: 'Worked days', value: insight.workedDays ?? 0 },
       { label: 'Expected days', value: insight.expectedWorkingDays ?? 0 },
       {
         label: 'Absent',
         value: insight.absentDays ?? 0,
-        valueColor: insight.absentDays ? COLORS.absent : COLORS.ink,
+        valueColor: insight.absentDays ? BRAND.absent : BRAND.ink,
       },
     ];
-    cards1.forEach((c, i) => {
-      const x = left + i * (cardW + gap);
-      doc.roundedRect(x, y, cardW, cardH, 6).fill(COLORS.surface);
-      doc.roundedRect(x, y, cardW, cardH, 6).lineWidth(0.5).strokeColor(COLORS.line).stroke();
-      drawLabelValue(doc, x + 12, y + 12, c.label, c.value, {
-        width: cardW - 24,
-        valueColor: c.valueColor || COLORS.ink,
-        valueSize: 20,
-      });
+    row1.forEach((c, i) => {
+      drawMetric(doc, left + i * (cardW + gap), y, cardW, cardH, c.label, c.value, c);
     });
-    y += cardH + 12;
+    y += cardH + gap;
 
-    // Metric cards row 2
-    const cards2 = [
-      { label: 'Late this month', value: insight.lateCount ?? insight.lateDays ?? 0 },
+    const row2 = [
+      { label: 'Onsite', value: insight.onsiteDays ?? 0 },
+      { label: 'Remote', value: insight.remoteDays ?? 0 },
       {
-        label: 'Strikes this month',
-        value: insight.strikeCount ?? 0,
-        valueColor: insight.strikeCount ? COLORS.late : COLORS.ink,
-      },
-      {
-        label: 'Avg in / out (PKT)',
+        label: 'Avg in / out',
         value: `${insight.avgCheckInTime || '—'} / ${insight.avgCheckOutTime || '—'}`,
-        valueSize: 13,
+        valueSize: 12,
       },
     ];
-    cards2.forEach((c, i) => {
-      const x = left + i * (cardW + gap);
-      doc.roundedRect(x, y, cardW, cardH, 6).fill(COLORS.surface);
-      doc.roundedRect(x, y, cardW, cardH, 6).lineWidth(0.5).strokeColor(COLORS.line).stroke();
-      drawLabelValue(doc, x + 12, y + 12, c.label, c.value, {
-        width: cardW - 24,
-        valueColor: c.valueColor || COLORS.ink,
-        valueSize: c.valueSize || 20,
-      });
+    row2.forEach((c, i) => {
+      drawMetric(doc, left + i * (cardW + gap), y, cardW, cardH, c.label, c.value, c);
     });
-    y += cardH + 20;
+    y += cardH + gap;
 
-    // Leave section
+    const row3 = [
+      { label: 'Late', value: insight.lateCount ?? insight.lateDays ?? 0 },
+      {
+        label: 'Strikes',
+        value: insight.strikeCount ?? 0,
+        valueColor: insight.strikeCount ? BRAND.late : BRAND.ink,
+      },
+      {
+        label: 'Leave days',
+        value: insight.leaveDays ?? 0,
+        valueColor: insight.leaveDays ? BRAND.tealDark : BRAND.ink,
+      },
+    ];
+    row3.forEach((c, i) => {
+      drawMetric(doc, left + i * (cardW + gap), y, cardW, cardH, c.label, c.value, c);
+    });
+    y += cardH + 18;
+
+    // ── Leave panel ───────────────────────────────────────────────────────
+    const leaveItems = Array.isArray(insight.leaveItems) ? insight.leaveItems : [];
+    const leaveH = Math.min(120, 72 + leaveItems.slice(0, 3).length * 14);
+    doc.roundedRect(left, y, contentW, leaveH, 4).fill(BRAND.surface);
+    doc.rect(left, y, 3, leaveH).fill(BRAND.teal);
+
     doc
-      .fontSize(12)
       .font('Helvetica-Bold')
-      .fillColor(COLORS.ink)
-      .text('Leave', left, y);
-    y = doc.y + 8;
-    doc
       .fontSize(10)
-      .font('Helvetica')
-      .fillColor(COLORS.muted)
-      .text('Taken this month', left, y);
+      .fillColor(BRAND.ink)
+      .text('Leave', left + 14, y + 12);
     doc
-      .fillColor(COLORS.ink)
-      .text(insight.leaveTakenLabel || 'None', left + 120, y, { width: contentWidth - 120 });
-    y = Math.max(doc.y, y + 14) + 4;
+      .font('Helvetica')
+      .fontSize(8)
+      .fillColor(BRAND.muted)
+      .text('TAKEN THIS MONTH', left + 14, y + 30, { characterSpacing: 0.5 });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(11)
+      .fillColor(BRAND.ink)
+      .text(insight.leaveTakenLabel || 'None', left + 14, y + 42, {
+        width: contentW / 2 - 28,
+      });
 
-    const items = Array.isArray(insight.leaveItems) ? insight.leaveItems : [];
-    if (items.length) {
-      for (const it of items) {
+    doc
+      .font('Helvetica')
+      .fontSize(8)
+      .fillColor(BRAND.muted)
+      .text('CURRENT BALANCE', left + contentW / 2, y + 30, { characterSpacing: 0.5 });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(10)
+      .fillColor(BRAND.ink)
+      .text(insight.leaveBalancesLabel || 'Annual 0 · Sick 0 · Casual 0', left + contentW / 2, y + 42, {
+        width: contentW / 2 - 20,
+      });
+
+    let ly = y + 62;
+    if (leaveItems.length) {
+      for (const it of leaveItems.slice(0, 3)) {
         const type = it.leaveType || 'Leave';
-        const rangeLabel =
+        const r =
           it.fromDate && it.toDate && it.fromDate !== it.toDate
             ? `${it.fromDate} → ${it.toDate}`
             : it.fromDate || it.toDate || '—';
         const days = it.daysInPeriod != null ? ` (${it.daysInPeriod}d)` : '';
         doc
-          .fontSize(10)
-          .fillColor(COLORS.ink)
-          .text(`• ${type}: ${rangeLabel}${days}`, left + 12, y, { width: contentWidth - 12 });
-        y = doc.y + 2;
+          .font('Helvetica')
+          .fontSize(9)
+          .fillColor(BRAND.ink)
+          .text(`• ${type}: ${r}${days}`, left + 14, ly, { width: contentW - 28 });
+        ly = doc.y + 2;
       }
-      y += 6;
     }
+    y += leaveH + 16;
 
-    doc.fontSize(10).fillColor(COLORS.muted).text('Balances remaining', left, y);
+    // ── Detail rows ───────────────────────────────────────────────────────
     doc
-      .fillColor(COLORS.ink)
-      .text(insight.leaveBalancesLabel || 'Annual 0 · Sick 0 · Casual 0', left + 120, y, {
-        width: contentWidth - 120,
-      });
-    y = Math.max(doc.y, y + 14) + 16;
-
-    // Extra attendance context
-    doc.fontSize(12).font('Helvetica-Bold').fillColor(COLORS.ink).text('Attendance detail', left, y);
+      .font('Helvetica-Bold')
+      .fontSize(10)
+      .fillColor(BRAND.ink)
+      .text('Hours & detail', left, y);
     y = doc.y + 8;
+
     const detail = [
-      ['Present days', insight.presentDays ?? 0],
-      ['Onsite days', insight.onsiteDays ?? 0],
-      ['Remote days', insight.remoteDays ?? 0],
-      ['Leave days', insight.leaveDays ?? 0],
+      ['Present / half days', `${insight.presentDays ?? 0} / ${insight.halfDays ?? 0}`],
       ['Holiday days', insight.holidayDays ?? 0],
       ['Worked hours', insight.workedDuration || '—'],
       ['Expected hours', insight.expectedDuration || '—'],
       ['Hours variance', insight.hoursVarianceDuration || '—'],
     ];
     for (const [label, value] of detail) {
-      doc.fontSize(10).font('Helvetica').fillColor(COLORS.muted).text(label, left, y, { width: 160 });
-      doc.fillColor(COLORS.ink).text(String(value), left + 170, y, { width: contentWidth - 170 });
-      y = Math.max(doc.y, y + 14);
+      doc.font('Helvetica').fontSize(9).fillColor(BRAND.muted).text(label, left, y, { width: 150 });
+      doc.fillColor(BRAND.ink).text(String(value), left + 160, y, { width: contentW - 160 });
+      y = Math.max(doc.y, y + 13);
     }
 
-    // Footer
-    const footerY = doc.page.height - 40;
+    // ── Footer band ───────────────────────────────────────────────────────
+    const footY = pageH - 36;
+    doc.rect(0, footY - 8, pageW, 44).fill(BRAND.navy);
     doc
-      .moveTo(left, footerY - 8)
-      .lineTo(left + contentWidth, footerY - 8)
-      .strokeColor(COLORS.line)
-      .lineWidth(0.5)
-      .stroke();
-    doc
+      .font('Helvetica')
       .fontSize(8)
-      .fillColor(COLORS.muted)
-      .text('Sent by Aidapt ALMS · The operator’s AI firm · aidapt.co', left, footerY, {
-        width: contentWidth,
-        align: 'left',
+      .fillColor('#9AA6B8')
+      .text('Sent by Aidapt ALMS  ·  The operator’s AI firm  ·  aidapt.co', left, footY + 4, {
+        width: contentW,
       });
 
     doc.end();
   });
 }
 
-/**
- * Build PDF payload for one employee insight (no Buffer in return).
- * @returns {Promise<{employeeId, employeeName, filename, contentType, contentBase64, byteLength}>}
- */
 async function buildEmployeeMonthlyPdfAttachment(insight, range) {
   const buffer = await renderEmployeeMonthlyPdf(insight, range);
   const filename = monthlyPdfFilename(insight, range);
@@ -274,11 +319,6 @@ async function buildEmployeeMonthlyPdfAttachment(insight, range) {
   };
 }
 
-/**
- * Attach pdf metadata onto each insight (mutates copies).
- * @param {Array<object>} insights
- * @param {{from: string, to: string}} range
- */
 async function attachMonthlyPdfs(insights, range) {
   if (!insights || !insights.length) return [];
   const out = [];
@@ -294,4 +334,5 @@ module.exports = {
   buildEmployeeMonthlyPdfAttachment,
   attachMonthlyPdfs,
   monthlyPdfFilename,
+  BRAND,
 };
