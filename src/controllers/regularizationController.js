@@ -53,6 +53,16 @@ const list = asyncHandler(async (req, res) => {
   res.json({ data: rows });
 });
 
+/**
+ * Approver queue. Manager → Pending requests of direct reports (assigned
+ * manager). HR Admin → all Pending company-wide. Never includes the caller's
+ * own requests. Employee → 403.
+ */
+const listPendingForApprover = asyncHandler(async (req, res) => {
+  const rows = await regularizationService.listPendingForApprover(req.user);
+  res.json({ data: rows });
+});
+
 const getOne = asyncHandler(async (req, res) => {
   const request = await regularizationService.getById(req.params.id);
   const isOwner = request.employee.includes(req.user.id);
@@ -83,4 +93,14 @@ const remove = asyncHandler(async (req, res) => {
   res.json({ data: result });
 });
 
-module.exports = { submit, list, getOne, update, approve, reject, remove, schemas };
+module.exports = {
+  submit,
+  list,
+  listPendingForApprover,
+  getOne,
+  update,
+  approve,
+  reject,
+  remove,
+  schemas,
+};

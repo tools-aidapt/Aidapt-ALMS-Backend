@@ -19,13 +19,21 @@ const RegularizationRequest = makeModel({
   },
 });
 
-/** Filtered list for the regularization list endpoint. */
-RegularizationRequest.query = function query({ employeeId, managerId, status } = {}) {
+/** Filtered list for the regularization list and approver-queue endpoints. */
+RegularizationRequest.query = function query({
+  employeeId,
+  managerId,
+  status,
+  excludeEmployeeId,
+} = {}) {
   const where = [];
   const params = [];
   if (employeeId) where.push(`employee_id = $${params.push(employeeId)}`);
   if (managerId) where.push(`manager_id = $${params.push(managerId)}`);
   if (status) where.push(`status = $${params.push(status)}`);
+  if (excludeEmployeeId) {
+    where.push(`employee_id <> $${params.push(excludeEmployeeId)}`);
+  }
   return this.selectWhere(where.join(' AND '), params, 'ORDER BY applied_at DESC');
 };
 

@@ -218,13 +218,17 @@ async function applyApproval(request, approverId) {
 
 /**
  * In-app approve/reject. A Manager may only decide requests where they are the
- * assigned approver; HR Admin may decide any.
+ * assigned approver; HR Admin may decide any. Nobody may decide their own request.
  */
 async function decideInApp(requestId, action, caller) {
   const request = await RegularizationRequest.get(requestId);
   if (!request) throw notFound('Regularization request not found');
   if (request.fields.Status !== 'Pending') {
     throw conflict(`Request already ${request.fields.Status}`, 'ALREADY_DECIDED');
+  }
+
+  if ((request.fields.Employee || []).includes(caller.id)) {
+    throw forbidden('You cannot decide your own regularization request');
   }
 
   const isHrAdmin = caller.role === 'HR Admin';
@@ -245,9 +249,33 @@ async function decideInApp(requestId, action, caller) {
   return { request: await withPeople(serialize(updated)), punch: null };
 }
 
-async function list({ employeeId, managerId, status } = {}) {
-  const rows = await RegularizationRequest.query({ employeeId, managerId, status });
+async function list({ employeeId, managerId, status, excludeEmployeeId } = {}) {
+  const rows = await RegularizationRequest.query({
+    employeeId,
+    managerId,
+    status,
+    excludeEmployeeId,
+  });
   return attachPeople(rows.map(serialize));
+}
+
+/**
+ * Approver inbox: Pending requests for reports (Manager) or company-wide (HR),
+ * never including the caller's own submissions.
+ */
+async function listPendingForApprover(caller) {
+  if (caller.role === 'Employee') {
+    throw forbidden('Employees do not have a regularization approval queue');
+  }
+  const filters = {
+    status: 'Pending',
+    excludeEmployeeId: caller.id,
+  };
+  if (caller.role === 'Manager') {
+    filters.managerId = caller.id;
+  }
+  // Use module.exports.list so tests can stub the list layer.
+  return module.exports.list(filters);
 }
 
 async function getById(id) {
@@ -331,6 +359,7 @@ module.exports = {
   updateRequest,
   decideInApp,
   list,
+  listPendingForApprover,
   getById,
   cancel,
   serialize,

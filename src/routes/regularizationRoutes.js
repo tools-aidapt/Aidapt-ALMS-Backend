@@ -11,6 +11,8 @@ router.use(authenticate);
 
 router.post('/', validate(ctrl.schemas.submit), ctrl.submit);
 router.get('/', validate(ctrl.schemas.listQuery, 'query'), ctrl.list);
+// Approver queue — must precede /:id so "pending-for-approver" is not an id.
+router.get('/pending-for-approver', ctrl.listPendingForApprover);
 router.get('/:id', ctrl.getOne);
 router.patch('/:id', validate(ctrl.schemas.update), ctrl.update); // owner edits own pending request
 router.delete('/:id', ctrl.remove); // owner cancels own pending request
