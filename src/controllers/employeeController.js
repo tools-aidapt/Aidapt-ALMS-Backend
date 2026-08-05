@@ -14,6 +14,7 @@ const {
   applyProfileBodyToFields,
   attachPrivateProfileFields,
 } = require('../utils/employeeProfileFields');
+const uploadService = require('../services/uploadService');
 
 const ROLE_VALUES = ['Employee', 'Manager', 'HR Admin'];
 
@@ -152,6 +153,12 @@ const create = asyncHandler(async (req, res) => {
     applyProfileBodyToFields(body, fields);
 
     const rec = await Employee.createWithId(userId, fields);
+    // If HR uploaded CNIC/photos first, re-own them onto the new employee.
+    await Promise.all([
+      uploadService.reassignUploadOwnerFromUrl(body.cnicFrontUrl, userId),
+      uploadService.reassignUploadOwnerFromUrl(body.cnicBackUrl, userId),
+      uploadService.reassignUploadOwnerFromUrl(body.photoUrl, userId),
+    ]);
 
     // Seed a zeroed leave-balance row so approvals have somewhere to deduct from.
     await LeaveBalance.create({ Employee: [userId], Annual: 0, Sick: 0, Casual: 0 });
@@ -200,6 +207,11 @@ const update = asyncHandler(async (req, res) => {
   applyProfileBodyToFields(body, fields);
 
   const updated = await Employee.update(rec.id, fields);
+  await Promise.all([
+    uploadService.reassignUploadOwnerFromUrl(body.cnicFrontUrl, rec.id),
+    uploadService.reassignUploadOwnerFromUrl(body.cnicBackUrl, rec.id),
+    uploadService.reassignUploadOwnerFromUrl(body.photoUrl, rec.id),
+  ]);
   res.json({ data: serialize(updated, req.user) });
 });
 
@@ -216,6 +228,11 @@ const updateSelf = asyncHandler(async (req, res) => {
   applyProfileBodyToFields(body, fields);
 
   const updated = await Employee.update(rec.id, fields);
+  await Promise.all([
+    uploadService.reassignUploadOwnerFromUrl(body.cnicFrontUrl, rec.id),
+    uploadService.reassignUploadOwnerFromUrl(body.cnicBackUrl, rec.id),
+    uploadService.reassignUploadOwnerFromUrl(body.photoUrl, rec.id),
+  ]);
   res.json({ data: serialize(updated, req.user) });
 });
 
