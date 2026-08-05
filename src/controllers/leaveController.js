@@ -5,6 +5,7 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const leaveService = require('../services/leaveService');
 const Employee = require('../models/Employee');
 const { ROLES } = require('../middleware/auth');
+const { resolveEmployeeRecordScope } = require('../utils/employeeRecordScope');
 const { forbidden, notFound } = require('../middleware/errorHandler');
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
@@ -51,9 +52,21 @@ const submit = asyncHandler(async (req, res) => {
 });
 
 const list = asyncHandler(async (req, res) => {
-  const filters = { ...req.query };
-  if (req.user.role === ROLES.EMPLOYEE) filters.employeeId = req.user.id;
-  const rows = await leaveService.list(filters);
+  // Same single-employee matrix as attendance / regularizations.
+  const employeeId = await resolveEmployeeRecordScope(req.user, req.query.employeeId);
+  const rows = await leaveService.list({
+    employeeId,
+    status: req.query.status,
+  });
+  res.json({ data: rows });
+});
+
+/**
+ * Approver queue. Manager → Pending of direct reports; HR Admin → all Pending
+ * company-wide. Never includes the caller's own requests. Employee → 403.
+ */
+const listPendingForApprover = asyncHandler(async (req, res) => {
+  const rows = await leaveService.listPendingForApprover(req.user);
   res.json({ data: rows });
 });
 
@@ -118,4 +131,17 @@ const setBalance = asyncHandler(async (req, res) => {
   res.json({ data });
 });
 
-module.exports = { submit, list, getOne, update, remove, approve, reject, decide, balances, setBalance, schemas };
+module.exports = {
+  submit,
+  list,
+  listPendingForApprover,
+  getOne,
+  update,
+  remove,
+  approve,
+  reject,
+  decide,
+  balances,
+  setBalance,
+  schemas,
+};

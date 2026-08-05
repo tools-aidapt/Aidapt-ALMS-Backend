@@ -18,6 +18,8 @@ router.use(authenticate);
 
 router.post('/requests', validate(ctrl.schemas.submit), ctrl.submit);
 router.get('/requests', validate(ctrl.schemas.listQuery, 'query'), ctrl.list);
+// Approver queue — exact path the client polls; additive if client still uses /requests.
+router.get('/pending-for-approver', ctrl.listPendingForApprover);
 router.get('/requests/:id', ctrl.getOne);
 router.patch('/requests/:id', validate(ctrl.schemas.update), ctrl.update);
 router.delete('/requests/:id', ctrl.remove);

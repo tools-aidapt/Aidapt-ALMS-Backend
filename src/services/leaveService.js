@@ -21,9 +21,12 @@ const DEFAULT_WORKING_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
 function serialize(rec) {
   const f = rec.fields;
+  const employee = f.Employee || [];
   return {
     id: rec.id,
-    employee: f.Employee || [],
+    employee,
+    // Scalar owner id — same defence-in-depth shape as regularizations.
+    employeeId: employee[0] || null,
     leaveType: f.LeaveType || null,
     fromDate: f.FromDate || null,
     toDate: f.ToDate || null,
@@ -259,11 +262,15 @@ async function applyDecision(request, decision, decidedById = null) {
 /**
  * In-app approve/reject. The caller (Manager/HR Admin) is authorised here:
  * a Manager may only decide requests where they are the assigned approver;
- * HR Admin may decide any.
+ * HR Admin may decide any. Nobody may decide their own request.
  */
 async function decideInApp(requestId, action, caller) {
   const request = await LeaveRequest.get(requestId);
   if (!request) throw notFound('Leave request not found');
+
+  if ((request.fields.Employee || []).includes(caller.id)) {
+    throw forbidden('You cannot decide your own leave request');
+  }
 
   const isHrAdmin = caller.role === 'HR Admin';
   const isAssignedManager = (request.fields.Manager || []).includes(caller.id);
@@ -403,9 +410,32 @@ async function deleteRequest(requestId, employeeId) {
   return { id: requestId, deleted: true };
 }
 
-async function list({ employeeId, status } = {}) {
-  const rows = await LeaveRequest.query({ employeeId, status });
+async function list({ employeeId, managerId, status, excludeEmployeeId } = {}) {
+  const rows = await LeaveRequest.query({
+    employeeId,
+    managerId,
+    status,
+    excludeEmployeeId,
+  });
   return attachPeople(rows.map(serialize));
+}
+
+/**
+ * Approver inbox: Pending leave for reports (Manager) or company-wide (HR),
+ * never including the caller's own submissions.
+ */
+async function listPendingForApprover(caller) {
+  if (caller.role === 'Employee') {
+    throw forbidden('Employees do not have a leave approval queue');
+  }
+  const filters = {
+    status: 'Pending',
+    excludeEmployeeId: caller.id,
+  };
+  if (caller.role === 'Manager') {
+    filters.managerId = caller.id;
+  }
+  return module.exports.list(filters);
 }
 
 async function getById(id) {
@@ -464,6 +494,7 @@ module.exports = {
   decideInApp,
   decideByToken,
   list,
+  listPendingForApprover,
   getById,
   balancesFor,
   setBalance,
