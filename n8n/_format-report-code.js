@@ -95,24 +95,80 @@ function buildDailyHtml(rows) {
     .join('');
 }
 
+function formatLeaveItemsHtml(items) {
+  if (!items || !items.length) return '—';
+  return items
+    .map((it) => {
+      const type = it.leaveType || 'Leave';
+      const range =
+        it.fromDate && it.toDate && it.fromDate !== it.toDate
+          ? `${it.fromDate} → ${it.toDate}`
+          : it.fromDate || it.toDate || '—';
+      const days = it.daysInPeriod != null ? ` (${it.daysInPeriod}d)` : '';
+      return `${esc(type)} ${esc(range)}${esc(days)}`;
+    })
+    .join('<br>');
+}
+
+/** Full HTML card for one employee (monthly email body). */
+function buildEmployeeInsightCardHtml(i) {
+  const probation = i.onProbation
+    ? `<span style="color:${brand.late};font-weight:600">On probation</span>${
+        i.probationEndsOn ? ` · ends <strong>${esc(i.probationEndsOn)}</strong>` : ''
+      }`
+    : `<span style="color:${brand.muted}">${esc(i.employmentStatus || 'Full-time')}</span>`;
+  const leaveDetail = formatLeaveItemsHtml(i.leaveItems);
+  const pdfName = (i.pdf && i.pdf.filename) || null;
+
+  return `
+<tr>
+  <td style="padding:0;border-bottom:1px solid ${brand.line}">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+      <tr>
+        <td style="padding:16px 16px 8px;background:${brand.surface}">
+          <div style="font-size:16px;font-weight:700;color:${brand.ink}">${esc(i.employeeName || '')}</div>
+          <div style="margin-top:3px;font-size:12px;color:${brand.muted}">${esc(i.teamName || '—')} · ${probation}</div>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 16px 16px;background:${brand.surface}">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:${brand.white};border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
+            <tr>
+              <td style="${td};width:25%"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase;letter-spacing:0.04em">Worked</span><strong style="font-size:18px">${i.workedDays ?? 0}</strong></td>
+              <td style="${td};width:25%"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase;letter-spacing:0.04em">Expected</span><strong style="font-size:18px">${i.expectedWorkingDays ?? 0}</strong></td>
+              <td style="${td};width:25%"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase;letter-spacing:0.04em">Absent</span><strong style="font-size:18px;color:${i.absentDays ? brand.absent : brand.ink}">${i.absentDays ?? 0}</strong></td>
+              <td style="${td};width:25%"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase;letter-spacing:0.04em">Remote</span><strong style="font-size:18px">${i.remoteDays ?? 0}</strong></td>
+            </tr>
+            <tr>
+              <td style="${td}"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase;letter-spacing:0.04em">Onsite</span><strong>${i.onsiteDays ?? 0}</strong></td>
+              <td style="${td}"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase;letter-spacing:0.04em">Late</span><strong>${i.lateCount ?? i.lateDays ?? 0}</strong></td>
+              <td style="${td}"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase;letter-spacing:0.04em">Strikes</span><strong style="color:${i.strikeCount ? brand.late : brand.ink}">${i.strikeCount ?? 0}</strong></td>
+              <td style="${td}"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase;letter-spacing:0.04em">Avg in / out</span><strong>${esc(i.avgCheckInTime || '—')} / ${esc(i.avgCheckOutTime || '—')}</strong></td>
+            </tr>
+            <tr>
+              <td style="${td}" colspan="2">
+                <span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase;letter-spacing:0.04em">Leave taken this month</span>
+                <strong>${esc(i.leaveTakenLabel || 'None')}</strong>
+                ${leaveDetail !== '—' ? `<div style="margin-top:4px;font-size:12px;color:${brand.muted};line-height:1.45">${leaveDetail}</div>` : ''}
+              </td>
+              <td style="${td}" colspan="2">
+                <span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase;letter-spacing:0.04em">Current leave balance</span>
+                <span style="font-size:13px;line-height:1.45">${esc(i.leaveBalancesLabel || '—')}</span>
+                ${pdfName ? `<div style="margin-top:6px;font-size:11px;color:${brand.muted}">PDF: <strong style="color:${brand.ink}">${esc(pdfName)}</strong></div>` : ''}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>`;
+}
+
 function buildMonthlyPackageCoverHtml({ toName, roleLabel, insights }) {
   const rangeLabel = from === to ? from : `${from} → ${to}`;
   const list = Array.isArray(insights) ? insights : [];
-  const rowsHtml = list
-    .map((i) => {
-      const leave = i.leaveTakenLabel && i.leaveTakenLabel !== 'None' ? i.leaveTakenLabel : '—';
-      return `<tr>
-  <td style="${td}"><strong>${esc(i.employeeName || '')}</strong></td>
-  <td style="${tdCenter}">${i.workedDays ?? 0}</td>
-  <td style="${tdCenter}">${i.expectedWorkingDays ?? 0}</td>
-  <td style="${tdCenter}">${i.absentDays ?? 0}</td>
-  <td style="${tdCenter}">${i.remoteDays ?? 0}</td>
-  <td style="${td}">${esc(leave)}</td>
-  <td style="${td}"><span style="font-size:12px">${esc(i.leaveBalancesLabel || '—')}</span></td>
-  <td style="${td}">${esc((i.pdf && i.pdf.filename) || '—')}</td>
-</tr>`;
-    })
-    .join('');
+  const cards = list.map(buildEmployeeInsightCardHtml).join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -142,25 +198,22 @@ function buildMonthlyPackageCoverHtml({ toName, roleLabel, insights }) {
                 Your <strong style="color:${brand.ink}">monthly</strong> attendance package for
                 <strong style="color:${brand.ink}">${esc(rangeLabel)}</strong>
                 <span style="color:${brand.teal}"> · ${esc(roleLabel)} view</span>.
-                Each employee has a brand PDF attached (one file per person).
+              </p>
+              <p style="margin:0 0 16px;font-size:13px;color:${brand.muted};line-height:1.5">
+                Below is the full HTML summary for every employee in your scope.
+                Matching PDFs (one per employee) are attached to this email.
+                Expected days = company Mon–Fri − holidays (same for all).
               </p>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
-                <thead>
-                  <tr>
-                    <th style="${th}">Employee</th>
-                    <th style="${th}">Worked</th>
-                    <th style="${th}">Expected</th>
-                    <th style="${th}">Absent</th>
-                    <th style="${th}">Remote</th>
-                    <th style="${th}">Leave taken</th>
-                    <th style="${th}">Balance</th>
-                    <th style="${th}">PDF</th>
-                  </tr>
-                </thead>
-                <tbody>${rowsHtml || `<tr><td colspan="8" style="${td};text-align:center;color:${brand.muted}">No employees in this view.</td></tr>`}</tbody>
+                <tbody>
+                  ${
+                    cards ||
+                    `<tr><td style="padding:20px;text-align:center;color:${brand.muted}">No employees in this view.</td></tr>`
+                  }
+                </tbody>
               </table>
               <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
-                ${list.length} PDF${list.length === 1 ? '' : 's'} attached · Expected days = company Mon–Fri − holidays (same for all)
+                ${list.length} employee${list.length === 1 ? '' : 's'} · ${list.filter((i) => i.pdf).length} PDF${list.filter((i) => i.pdf).length === 1 ? '' : 's'} attached
               </p>
             </td>
           </tr>
@@ -266,7 +319,7 @@ function buildEmailHtml({ toName, roleLabel, rows }) {
 }
 
 function formatLeaveItemsMd(items) {
-  if (!items || !items.length) return '—';
+  if (!items || !items.length) return null;
   return items
     .map((it) => {
       const type = it.leaveType || 'Leave';
@@ -275,64 +328,103 @@ function formatLeaveItemsMd(items) {
           ? `${it.fromDate} → ${it.toDate}`
           : it.fromDate || it.toDate || '—';
       const days = it.daysInPeriod != null ? ` (${it.daysInPeriod}d)` : '';
-      return `${type} ${range}${days}`;
+      return `  - ${type}: ${range}${days}`;
     })
-    .join('; ');
+    .join('\n');
+}
+
+/** One markdown section per employee (ClickUp). */
+function buildEmployeeInsightMarkdown(i, index) {
+  const n = index + 1;
+  const probation = i.onProbation
+    ? `On probation${i.probationEndsOn ? ` · ends ${i.probationEndsOn}` : ''}${
+        i.dateOfJoining ? ` · joined ${i.dateOfJoining}` : ''
+      }`
+    : i.employmentStatus || 'Full-time';
+  const lines = [
+    `### ${n}. ${mdCell(i.employeeName)}`,
+    '',
+    `| | |`,
+    `| --- | --- |`,
+    `| **Team** | ${mdCell(i.teamName)} |`,
+    `| **Status** | ${mdCell(probation)} |`,
+    `| **Worked days** | ${i.workedDays ?? 0} (onsite ${i.onsiteDays ?? 0} · remote ${i.remoteDays ?? 0}) |`,
+    `| **Expected days** | ${i.expectedWorkingDays ?? 0} |`,
+    `| **Absent** | ${i.absentDays ?? 0} |`,
+    `| **Late** | ${i.lateCount ?? i.lateDays ?? 0} |`,
+    `| **Strikes** | ${i.strikeCount ?? 0} |`,
+    `| **Avg check-in / out** | ${mdCell(i.avgCheckInTime)} / ${mdCell(i.avgCheckOutTime)} |`,
+    `| **Leave taken** | ${mdCell(i.leaveTakenLabel || 'None')} |`,
+    `| **Leave balance** | ${mdCell(i.leaveBalancesLabel)} |`,
+  ];
+  if (i.pdf && i.pdf.filename) {
+    lines.push(`| **PDF** | \`${mdCell(i.pdf.filename)}\` |`);
+  }
+  lines.push('');
+  const leaveLines = formatLeaveItemsMd(i.leaveItems);
+  if (leaveLines) {
+    lines.push('**Leave details**');
+    lines.push(leaveLines);
+    lines.push('');
+  }
+  lines.push('---');
+  lines.push('');
+  return lines.join('\n');
 }
 
 function buildInsightsMarkdown(insights) {
-  if (!insights || !insights.length) return '_No monthly summary for this view._\n';
+  if (!insights || !insights.length) return '_No employees in this monthly report._\n';
   const lines = [
-    '### Monthly employee summary',
+    '### Team monthly summary',
     '',
-    '_PDFs are emailed to managers (one package email per manager). Full files also attach to the ClickUp monthly task when configured._',
+    `**${insights.length}** employee${insights.length === 1 ? '' : 's'} · Expected days = Mon–Fri − holidays (same for all)`,
+    '',
+    '---',
     '',
   ];
-  for (const i of insights) {
-    const probation = i.onProbation
-      ? `On probation${i.probationEndsOn ? ` (ends ${i.probationEndsOn})` : ''}`
-      : i.employmentStatus || 'Full-time';
-    const pdfName = (i.pdf && i.pdf.filename) || null;
-    lines.push(`**${mdCell(i.employeeName)}** · ${mdCell(i.teamName)} · ${mdCell(probation)}`);
-    lines.push(
-      `- Days: **${i.workedDays ?? 0}** worked / **${i.expectedWorkingDays ?? 0}** expected · Absent **${i.absentDays ?? 0}** · Remote **${i.remoteDays ?? 0}**`
-    );
-    lines.push(
-      `- Late **${i.lateCount ?? i.lateDays ?? 0}** · Strikes **${i.strikeCount ?? 0}** · Avg in/out **${mdCell(i.avgCheckInTime)} / ${mdCell(i.avgCheckOutTime)}**`
-    );
-    lines.push(
-      `- Leave taken: ${mdCell(i.leaveTakenLabel || 'None')}${
-        i.leaveItems && i.leaveItems.length ? ` · ${mdCell(formatLeaveItemsMd(i.leaveItems))}` : ''
-      }`
-    );
-    lines.push(`- Balance: ${mdCell(i.leaveBalancesLabel)}`);
-    if (pdfName) lines.push(`- PDF: \`${mdCell(pdfName)}\``);
-    lines.push('');
-  }
+  insights.forEach((i, idx) => {
+    lines.push(buildEmployeeInsightMarkdown(i, idx));
+  });
   return lines.join('\n');
 }
 
 function buildDailyMarkdown(rows) {
-  const lines = [
-    '### Daily detail',
-    '',
-    '| Team | Employee | Date | In | Out | Status | Mode | Worked |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- |',
-  ];
+  const byEmp = new Map();
   for (const r of rows || []) {
-    const checkOut =
-      r.status === 'Still checked in'
-        ? 'Still checked in'
-        : r.status === 'On Leave'
-          ? '—'
-          : r.checkOutTime || '—';
-    const checkIn = r.status === 'On Leave' ? '—' : r.checkInTime || '—';
-    const status = `${r.status || ''}${r.isLate ? ' (Late)' : ''}`;
-    lines.push(
-      `| ${mdCell(r.teamName)} | ${mdCell(r.employeeName)} | ${mdCell(r.date)} | ${mdCell(checkIn)} | ${mdCell(checkOut)} | ${mdCell(status)} | ${mdCell(r.mode)} | ${mdCell(r.workedDuration)} |`
-    );
+    const key = r.employeeId || r.employeeName || 'unknown';
+    if (!byEmp.has(key)) {
+      byEmp.set(key, { name: r.employeeName, team: r.teamName, days: [] });
+    }
+    byEmp.get(key).days.push(r);
   }
-  lines.push('');
+
+  const lines = ['### Detail by employee', ''];
+  let n = 0;
+  for (const emp of byEmp.values()) {
+    n += 1;
+    lines.push(`### ${n}. ${mdCell(emp.name)}`);
+    lines.push(`_${mdCell(emp.team)}_`);
+    lines.push('');
+    lines.push('| Date | In | Out | Status | Mode | Worked |');
+    lines.push('| --- | --- | --- | --- | --- | --- |');
+    for (const r of emp.days) {
+      const checkOut =
+        r.status === 'Still checked in'
+          ? 'Still checked in'
+          : r.status === 'On Leave'
+            ? '—'
+            : r.checkOutTime || '—';
+      const checkIn = r.status === 'On Leave' ? '—' : r.checkInTime || '—';
+      const status = `${r.status || ''}${r.isLate ? ' (Late)' : ''}`;
+      lines.push(
+        `| ${mdCell(r.date)} | ${mdCell(checkIn)} | ${mdCell(checkOut)} | ${mdCell(status)} | ${mdCell(r.mode)} | ${mdCell(r.workedDuration)} |`
+      );
+    }
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+  }
+  if (!n) lines.push('_No attendance rows._\n');
   return lines.join('\n');
 }
 
@@ -353,23 +445,22 @@ function buildClickUpMarkdown({ rows, insights }) {
   const parts = [
     `## ${title}`,
     '',
-    isMonthly
-      ? `Period: **${rangeLabel}** · Employees in view: **${employeeCount}** (summary only)`
-      : `Period: **${rangeLabel}** · Employees in view: **${employeeCount}** · Rows: **${(rows || []).length}**`,
+    `**Period:** ${rangeLabel}`,
+    `**Employees:** ${employeeCount}`,
+    '',
+    '---',
     '',
   ];
 
   if (isMonthly) {
     parts.push(buildInsightsMarkdown(insights || []));
   } else {
-    const MAX_DAILY_ROWS = 80;
-    const clipped = (rows || []).slice(0, MAX_DAILY_ROWS);
-    const more =
-      (rows || []).length > MAX_DAILY_ROWS
-        ? `\n_…and ${(rows || []).length - MAX_DAILY_ROWS} more rows (see email for full detail)._\n`
-        : '';
+    const MAX_ROWS = 120;
+    const clipped = (rows || []).slice(0, MAX_ROWS);
     parts.push(buildDailyMarkdown(clipped));
-    if (more) parts.push(more);
+    if ((rows || []).length > MAX_ROWS) {
+      parts.push(`_…and ${(rows || []).length - MAX_ROWS} more rows (see email)._\n`);
+    }
   }
 
   parts.push('_Sent by Aidapt ALMS_');
@@ -442,9 +533,10 @@ for (const t of targets) {
   const toName = (report && report.name) || t.label;
 
   if (period === 'monthly') {
-    // ONE email per manager/HR with ALL employee PDFs attached (not 1 email per employee).
-    const list = Array.isArray(insights) ? insights.filter((i) => i && i.pdf && i.pdf.contentBase64) : [];
-    for (const i of list) {
+    // ONE email per manager/HR: full HTML for all employees + all PDFs attached.
+    const list = Array.isArray(insights) ? insights : [];
+    const withPdf = list.filter((i) => i && i.pdf && i.pdf.contentBase64);
+    for (const i of withPdf) {
       const key = i.employeeId || i.pdf.filename;
       if (!pdfSeen.has(key)) {
         pdfSeen.add(key);
@@ -457,22 +549,22 @@ for (const t of targets) {
         });
       }
     }
-    if (!list.length && !(insights || []).length) continue;
+    if (!list.length) continue;
     emails.push({
       channel: 'email',
       to: toEmail,
       toName,
       subject,
+      // Full HTML cards for every employee in this manager's scope
       html: buildMonthlyPackageCoverHtml({ toName, roleLabel, insights: list }),
       period,
       from,
       toDate: to,
-      hasPdf: list.length > 0,
-      pdfCount: list.length,
+      hasPdf: withPdf.length > 0,
+      pdfCount: withPdf.length,
       rowCount: list.length,
       scope: roleLabel,
-      // Multiple PDFs for Graph sendMail
-      attachments: list.map((i) => ({
+      attachments: withPdf.map((i) => ({
         filename: i.pdf.filename,
         contentBase64: i.pdf.contentBase64,
         contentType: i.pdf.contentType || 'application/pdf',

@@ -30,8 +30,8 @@ app.use(cors());
 // Rate limit before body parsing so flooded requests are rejected cheaply.
 app.use(apiRateLimiter);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Log every request (with payload) and every response.
 app.use(requestLogger);

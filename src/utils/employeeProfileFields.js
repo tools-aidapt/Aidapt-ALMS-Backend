@@ -88,7 +88,12 @@ const experienceSchema = z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD')
       .nullable(),
-    summary: z.string().optional().default(''),
+    // null / omit → ""; clients often send null for empty textarea.
+    summary: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((v) => (v == null ? '' : v)),
   })
   .refine((row) => row.toDate == null || row.toDate >= row.fromDate, {
     message: 'toDate must be on or after fromDate',

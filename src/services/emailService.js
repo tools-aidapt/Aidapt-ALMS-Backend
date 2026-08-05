@@ -348,42 +348,99 @@ function sendAttendanceReport({
       : (insights || []).map((i) => i.pdf).filter(Boolean)
     : [];
 
-  const pdfListRows = pdfAttachments
-    .map(
-      (p) => `
+  function formatLeaveItemsHtml(items) {
+    if (!items || !items.length) return '—';
+    return items
+      .map((it) => {
+        const type = it.leaveType || 'Leave';
+        const range =
+          it.fromDate && it.toDate && it.fromDate !== it.toDate
+            ? `${it.fromDate} → ${it.toDate}`
+            : it.fromDate || it.toDate || '—';
+        const days = it.daysInPeriod != null ? ` (${it.daysInPeriod}d)` : '';
+        return `${escapeHtml(type)} ${escapeHtml(range)}${escapeHtml(days)}`;
+      })
+      .join('<br>');
+  }
+
+  const insightCards = (insights || [])
+    .map((i) => {
+      const probationHtml = i.onProbation
+        ? `<span style="color:${brand.late};font-weight:600">On probation</span>${
+            i.probationEndsOn
+              ? ` · ends <strong>${escapeHtml(i.probationEndsOn)}</strong>`
+              : ''
+          }`
+        : `<span style="color:${brand.muted}">${escapeHtml(i.employmentStatus || 'Full-time')}</span>`;
+      const leaveDetail = formatLeaveItemsHtml(i.leaveItems);
+      const pdfName = (i.pdf && i.pdf.filename) || null;
+      return `
       <tr>
-        <td style="${td}">${escapeHtml(p.employeeName || '—')}</td>
-        <td style="${td}">${escapeHtml(p.filename || 'report.pdf')}</td>
-      </tr>`
-    )
+        <td style="padding:0;border-bottom:1px solid ${brand.line}">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+            <tr>
+              <td style="padding:16px 16px 8px;background:${brand.surface}">
+                <div style="font-size:16px;font-weight:700;color:${brand.ink}">${escapeHtml(i.employeeName || '')}</div>
+                <div style="margin-top:3px;font-size:12px;color:${brand.muted}">${escapeHtml(i.teamName || '—')} · ${probationHtml}</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 16px 16px;background:${brand.surface}">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:${brand.white};border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
+                  <tr>
+                    <td style="${td};width:25%"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase">Worked</span><strong style="font-size:18px">${i.workedDays ?? 0}</strong></td>
+                    <td style="${td};width:25%"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase">Expected</span><strong style="font-size:18px">${i.expectedWorkingDays ?? 0}</strong></td>
+                    <td style="${td};width:25%"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase">Absent</span><strong style="font-size:18px;color:${i.absentDays ? '#B91C1C' : brand.ink}">${i.absentDays ?? 0}</strong></td>
+                    <td style="${td};width:25%"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase">Remote</span><strong style="font-size:18px">${i.remoteDays ?? 0}</strong></td>
+                  </tr>
+                  <tr>
+                    <td style="${td}"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase">Onsite</span><strong>${i.onsiteDays ?? 0}</strong></td>
+                    <td style="${td}"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase">Late</span><strong>${i.lateCount ?? i.lateDays ?? 0}</strong></td>
+                    <td style="${td}"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase">Strikes</span><strong style="color:${i.strikeCount ? brand.late : brand.ink}">${i.strikeCount ?? 0}</strong></td>
+                    <td style="${td}"><span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase">Avg in/out</span><strong>${escapeHtml(i.avgCheckInTime || '—')} / ${escapeHtml(i.avgCheckOutTime || '—')}</strong></td>
+                  </tr>
+                  <tr>
+                    <td style="${td}" colspan="2">
+                      <span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase">Leave taken this month</span>
+                      <strong>${escapeHtml(i.leaveTakenLabel || 'None')}</strong>
+                      ${leaveDetail !== '—' ? `<div style="margin-top:4px;font-size:12px;color:${brand.muted}">${leaveDetail}</div>` : ''}
+                    </td>
+                    <td style="${td}" colspan="2">
+                      <span style="display:block;font-size:10px;color:${brand.muted};text-transform:uppercase">Current leave balance</span>
+                      <span style="font-size:13px">${escapeHtml(i.leaveBalancesLabel || '—')}</span>
+                      ${pdfName ? `<div style="margin-top:6px;font-size:11px;color:${brand.muted}">PDF: <strong>${escapeHtml(pdfName)}</strong></div>` : ''}
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>`;
+    })
     .join('');
 
   const insightsSection =
-    isMonthly && pdfAttachments.length
+    isMonthly && (insights || []).length
       ? `
     <div>
-      <h2 style="margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600">Monthly reports (PDF)</h2>
+      <h2 style="margin:0 0 6px;font-size:16px;color:${brand.ink};font-weight:600">Monthly report — all employees</h2>
       <p style="margin:0 0 14px;color:${brand.muted};font-size:13px;line-height:1.55">
-        One PDF per employee is attached to this email. Each file covers worked vs expected days,
-        absences, leave taken and balances, average check-in/out, late and strike counts, and probation.
+        Full summary below. Matching PDFs (one per employee) are attached to this email.
+        Expected days = company Mon–Fri − holidays (same for all).
       </p>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${brand.line};border-radius:8px;overflow:hidden">
-        <thead>
-          <tr>
-            <th style="${th}">Employee</th>
-            <th style="${th}">Attachment</th>
-          </tr>
-        </thead>
-        <tbody>${pdfListRows}</tbody>
+        <tbody>${insightCards}</tbody>
       </table>
       <p style="margin:14px 0 0;color:${brand.muted};font-size:12px">
-        ${pdfAttachments.length} PDF${pdfAttachments.length === 1 ? '' : 's'} attached
+        ${(insights || []).length} employee${(insights || []).length === 1 ? '' : 's'}
+        · ${pdfAttachments.length} PDF${pdfAttachments.length === 1 ? '' : 's'} attached
       </p>
     </div>`
       : isMonthly
         ? `
     <p style="margin:0;padding:20px 12px;text-align:center;color:${brand.muted};font-size:13px;border:1px solid ${brand.line};border-radius:8px">
-      No monthly PDFs for this view. If you lead a team, ensure members are assigned to your team in AIMS.
+      No monthly report for this view. If you lead a team, ensure members are assigned to your team in AIMS.
     </p>`
         : '';
 
@@ -394,7 +451,7 @@ function sendAttendanceReport({
       </td>
     </tr>`;
 
-  // Monthly emails are PDF-cover only. Daily/weekly keep per-day detail.
+  // Monthly emails are HTML employee cards + PDFs. Daily/weekly keep per-day detail.
   const dailySection = isMonthly
     ? ''
     : `

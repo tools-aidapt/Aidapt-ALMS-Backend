@@ -31,7 +31,18 @@ function notFoundHandler(req, res, next) {
 
 /* eslint-disable no-unused-vars */
 function errorHandler(err, req, res, next) {
-  const status = err.status || 500;
+  // body-parser / express.json payload limit (default message: "request entity too large")
+  if (err && (err.type === 'entity.too.large' || err.status === 413 || err.statusCode === 413)) {
+    return res.status(413).json({
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message:
+          'Request body is too large. For photos and CNIC images use POST /api/uploads (multipart, max 8 MB per file), then save the returned url on the profile — do not send data: URLs in JSON.',
+      },
+    });
+  }
+
+  const status = err.status || err.statusCode || 500;
   const code = err.code || 'INTERNAL_ERROR';
   const message =
     status === 500 && env.isProduction ? 'Something went wrong' : err.message;

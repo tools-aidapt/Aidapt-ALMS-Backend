@@ -54,8 +54,10 @@ function makeModel({ table, columns, createdColumn }) {
       if (cfg.link) {
         out[cfg.col] = Array.isArray(val) ? val[0] ?? null : val ?? null;
       } else if (cfg.json) {
-        // Pass objects/arrays through; node-pg serializes JSON/JSONB params.
-        out[cfg.col] = val == null ? null : val;
+        // Always stringify for jsonb. node-pg treats bare JS arrays as Postgres
+        // array params (e.g. []), which yields 22P02 invalid_text_representation
+        // against jsonb columns like emergency_contacts / education / experience.
+        out[cfg.col] = val == null ? null : JSON.stringify(val);
       } else {
         out[cfg.col] = val;
       }
