@@ -24,10 +24,19 @@ function makeModel({ table, columns, createdColumn }) {
     if (!row) return null;
     const fields = {};
     for (const fn of fieldNames) {
-      const { col, link } = columns[fn];
+      const { col, link, json } = columns[fn];
       const v = row[col];
       if (link) fields[fn] = v ? [v] : [];
-      else fields[fn] = v === undefined ? null : v;
+      else if (json) {
+        if (v == null) fields[fn] = [];
+        else if (typeof v === 'string') {
+          try {
+            fields[fn] = JSON.parse(v);
+          } catch {
+            fields[fn] = [];
+          }
+        } else fields[fn] = v;
+      } else fields[fn] = v === undefined ? null : v;
     }
     return {
       id: row.id,
@@ -44,6 +53,9 @@ function makeModel({ table, columns, createdColumn }) {
       const val = fields[fn];
       if (cfg.link) {
         out[cfg.col] = Array.isArray(val) ? val[0] ?? null : val ?? null;
+      } else if (cfg.json) {
+        // Pass objects/arrays through; node-pg serializes JSON/JSONB params.
+        out[cfg.col] = val == null ? null : val;
       } else {
         out[cfg.col] = val;
       }

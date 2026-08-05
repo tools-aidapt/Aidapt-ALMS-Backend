@@ -9,6 +9,11 @@ const emailService = require('../services/emailService');
 const env = require('../config/env');
 const { ROLES } = require('../middleware/auth');
 const { badRequest, notFound, forbidden, conflict } = require('../middleware/errorHandler');
+const {
+  profileFieldsSchema,
+  applyProfileBodyToFields,
+  attachPrivateProfileFields,
+} = require('../utils/employeeProfileFields');
 
 const ROLE_VALUES = ['Employee', 'Manager', 'HR Admin'];
 
@@ -26,6 +31,7 @@ const schemas = {
     photoUrl: z.string().optional(),
     employmentStatus: z.enum(['Probation', 'Full-time']).optional(),
     graceMinutes: z.number().int().nonnegative().nullable().optional(),
+    ...profileFieldsSchema,
   }),
   update: z
     .object({
@@ -39,12 +45,7 @@ const schemas = {
       photoUrl: z.string().nullable().optional(),
       employmentStatus: z.enum(['Probation', 'Full-time']).optional(),
       graceMinutes: z.number().int().nonnegative().nullable().optional(),
-      // Personal details — HR Admin may correct these on an employee's behalf.
-      phoneNo: z.string().nullable().optional(),
-      emergencyPhoneNo: z.string().nullable().optional(),
-      address: z.string().nullable().optional(),
-      bankName: z.string().nullable().optional(),
-      bankAccountNo: z.string().nullable().optional(),
+      ...profileFieldsSchema,
     })
     .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
   setStatus: z.object({
@@ -57,23 +58,19 @@ const schemas = {
     .object({
       name: z.string().min(1).optional(),
       photoUrl: z.string().nullable().optional(),
-      phoneNo: z.string().nullable().optional(),
-      emergencyPhoneNo: z.string().nullable().optional(),
-      address: z.string().nullable().optional(),
-      bankName: z.string().nullable().optional(),
-      bankAccountNo: z.string().nullable().optional(),
+      ...profileFieldsSchema,
     })
     .refine((o) => Object.keys(o).length > 0, { message: 'No fields to update' }),
 };
 
 /**
- * Shape an employee for output. Salary is only included for HR Admin or the
- * employee viewing their own record.
+ * Shape an employee for output. Sensitive profile fields (DOB, medical, CNIC,
+ * bank, salary, contact) are only included for HR Admin or the employee
+ * viewing their own record — Managers of reports get the public shape without
+ * those keys.
  */
 function serialize(rec, caller) {
   const f = rec.fields;
-  // Salary and personal contact/bank details are private: only the employee
-  // themselves or an HR Admin may see them.
   const canSeePrivate =
     caller && (caller.role === ROLES.HR_ADMIN || caller.id === rec.id);
   const out = {
@@ -93,12 +90,7 @@ function serialize(rec, caller) {
     createdAt: f.CreatedAt || rec.createdTime,
   };
   if (canSeePrivate) {
-    out.monthlySalary = f.MonthlySalary ?? null;
-    out.phoneNo = f.PhoneNo || null;
-    out.emergencyPhoneNo = f.EmergencyPhoneNo || null;
-    out.address = f.Address || null;
-    out.bankName = f.BankName || null;
-    out.bankAccountNo = f.BankAccountNo || null;
+    attachPrivateProfileFields(out, f);
   }
   return out;
 }
@@ -157,6 +149,7 @@ const create = asyncHandler(async (req, res) => {
     if (body.monthlySalary !== undefined) fields.MonthlySalary = body.monthlySalary;
     if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
     if (body.graceMinutes !== undefined) fields.GraceMinutes = body.graceMinutes;
+    applyProfileBodyToFields(body, fields);
 
     const rec = await Employee.createWithId(userId, fields);
 
@@ -204,11 +197,7 @@ const update = asyncHandler(async (req, res) => {
   if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
   if (body.employmentStatus !== undefined) fields.EmploymentStatus = body.employmentStatus;
   if (body.graceMinutes !== undefined) fields.GraceMinutes = body.graceMinutes;
-  if (body.phoneNo !== undefined) fields.PhoneNo = body.phoneNo;
-  if (body.emergencyPhoneNo !== undefined) fields.EmergencyPhoneNo = body.emergencyPhoneNo;
-  if (body.address !== undefined) fields.Address = body.address;
-  if (body.bankName !== undefined) fields.BankName = body.bankName;
-  if (body.bankAccountNo !== undefined) fields.BankAccountNo = body.bankAccountNo;
+  applyProfileBodyToFields(body, fields);
 
   const updated = await Employee.update(rec.id, fields);
   res.json({ data: serialize(updated, req.user) });
@@ -224,11 +213,7 @@ const updateSelf = asyncHandler(async (req, res) => {
   const fields = {};
   if (body.name !== undefined) fields.Name = body.name;
   if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
-  if (body.phoneNo !== undefined) fields.PhoneNo = body.phoneNo;
-  if (body.emergencyPhoneNo !== undefined) fields.EmergencyPhoneNo = body.emergencyPhoneNo;
-  if (body.address !== undefined) fields.Address = body.address;
-  if (body.bankName !== undefined) fields.BankName = body.bankName;
-  if (body.bankAccountNo !== undefined) fields.BankAccountNo = body.bankAccountNo;
+  applyProfileBodyToFields(body, fields);
 
   const updated = await Employee.update(rec.id, fields);
   res.json({ data: serialize(updated, req.user) });
