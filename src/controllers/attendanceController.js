@@ -4,8 +4,6 @@ const { z } = require('zod');
 const { asyncHandler } = require('../utils/asyncHandler');
 const attendanceService = require('../services/attendanceService');
 const { resolveEmployeeRecordScope } = require('../utils/employeeRecordScope');
-const { ROLES } = require('../middleware/auth');
-const { forbidden } = require('../middleware/errorHandler');
 
 const schemas = {
   checkin: z.object({
@@ -52,22 +50,24 @@ const list = asyncHandler(async (req, res) => {
   res.json({ data: rows });
 });
 
+/**
+ * Single punch by id. Same relationship check as the list matrix: owner, their
+ * manager (direct report), or HR Admin. Closes the bypass where Managers could
+ * read any punch UUID without a report check.
+ */
 const getOne = asyncHandler(async (req, res) => {
   const punch = await attendanceService.getById(req.params.id);
-  if (req.user.role === ROLES.EMPLOYEE && !punch.employee.includes(req.user.id)) {
-    throw forbidden('Not your attendance record');
-  }
+  const ownerId = punch.employeeId || (punch.employee && punch.employee[0]) || null;
+  await resolveEmployeeRecordScope(req.user, ownerId);
   res.json({ data: punch });
 });
 
-// Overview for the current user by default. Managers/HR Admins may pass
-// ?employeeId= to view someone else's; a plain Employee is locked to self.
+/**
+ * Month/range overview for exactly one employee — same scope matrix as list.
+ * Omitted employeeId ⇒ self for every role.
+ */
 const overview = asyncHandler(async (req, res) => {
-  let employeeId = req.user.id;
-  if (req.query.employeeId && req.query.employeeId !== req.user.id) {
-    if (req.user.role === ROLES.EMPLOYEE) throw forbidden('Not your attendance record');
-    employeeId = req.query.employeeId;
-  }
+  const employeeId = await resolveEmployeeRecordScope(req.user, req.query.employeeId);
   const data = await attendanceService.overview({
     employeeId,
     from: req.query.from,
