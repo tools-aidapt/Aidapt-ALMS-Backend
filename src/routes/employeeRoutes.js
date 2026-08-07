@@ -9,7 +9,8 @@ const router = express.Router();
 
 router.use(authenticate);
 
-router.get('/', requireRole(ROLES.HR_ADMIN, ROLES.MANAGER), ctrl.list);
+// HR, Manager, or Leadership team (enforced in controller for Leadership flag).
+router.get('/', ctrl.list);
 // Self-service: any authenticated employee edits their own personal details.
 // Must precede the '/:id' routes so "me" is never treated as an id.
 router.patch('/me', validate(ctrl.schemas.updateSelf), ctrl.updateSelf);

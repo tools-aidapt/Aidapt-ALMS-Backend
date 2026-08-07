@@ -304,3 +304,15 @@ create table if not exists employee_uploads (
 );
 create index if not exists employee_uploads_employee_idx
   on employee_uploads (employee_id);
+
+-- ---------------------------------------------------------------------------
+-- Employee ↔ team membership (many-to-many)
+-- ---------------------------------------------------------------------------
+create table if not exists employee_teams (
+  employee_id uuid not null references employees (id) on delete cascade,
+  team_id     uuid not null references teams (id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  primary key (employee_id, team_id)
+);
+create index if not exists employee_teams_team_idx on employee_teams (team_id);
+create index if not exists employee_teams_employee_idx on employee_teams (employee_id);

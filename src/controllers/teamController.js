@@ -8,7 +8,7 @@ const Employee = require('../models/Employee');
 const Shift = require('../models/Shift');
 const LeaveBalance = require('../models/LeaveBalance');
 const AttendancePunch = require('../models/AttendancePunch');
-const { ROLES } = require('../middleware/auth');
+const { hasCompanyWideDataAccess } = require('../utils/leadershipAccess');
 const { todayPktDateStr, pktTimeLabel } = require('../utils/dateUtils');
 const { notFound, conflict, badRequest } = require('../middleware/errorHandler');
 
@@ -51,15 +51,16 @@ function mapTodayPunch(punch) {
 
 /**
  * Whether the caller may see live punch / leave-balance detail for a team.
- * HR Admin → all teams; team lead of that team; members of that team.
- * Everyone else gets the org-chart shape only (names + membership).
+ * HR Admin / Leadership → all teams; team lead of that team; any multi-team
+ * membership that includes this team. Everyone else: org-chart shape only.
  */
-function canSeeTeamLiveDetail(caller, teamRec, callerTeamId) {
+function canSeeTeamLiveDetail(caller, teamRec, callerTeamIds) {
   if (!caller) return false;
-  if (caller.role === ROLES.HR_ADMIN) return true;
+  if (hasCompanyWideDataAccess(caller)) return true;
   const leadId = (teamRec.fields.Lead && teamRec.fields.Lead[0]) || null;
   if (leadId && leadId === caller.id) return true;
-  return Boolean(callerTeamId && callerTeamId === teamRec.id);
+  const ids = Array.isArray(callerTeamIds) ? callerTeamIds : callerTeamIds ? [callerTeamIds] : [];
+  return ids.includes(teamRec.id);
 }
 
 /**
@@ -180,32 +181,30 @@ function toFields(body) {
   return fields;
 }
 
-async function resolveCallerTeamId(caller) {
-  if (!caller || !caller.id) return null;
-  const me = await Employee.get(caller.id);
-  if (!me) return null;
-  return (me.fields.Team || [])[0] || null;
+async function resolveCallerTeamIds(caller) {
+  if (!caller || !caller.id) return [];
+  return Employee.listTeamIds(caller.id);
 }
 
-async function teamWithMembers(rec, caller, callerTeamId) {
-  const includeLiveDetail = canSeeTeamLiveDetail(caller, rec, callerTeamId);
+async function teamWithMembers(rec, caller, callerTeamIds) {
+  const includeLiveDetail = canSeeTeamLiveDetail(caller, rec, callerTeamIds);
   const members = await Team.findMembers(rec.id);
   const enriched = await enrichMembers(members, { includeLiveDetail });
   return serializeTeam(rec, enriched);
 }
 
 const list = asyncHandler(async (req, res) => {
-  const callerTeamId = await resolveCallerTeamId(req.user);
+  const callerTeamIds = await resolveCallerTeamIds(req.user);
   const rows = await Team.list({ sort: [{ field: 'Name', direction: 'asc' }] });
-  const data = await Promise.all(rows.map((r) => teamWithMembers(r, req.user, callerTeamId)));
+  const data = await Promise.all(rows.map((r) => teamWithMembers(r, req.user, callerTeamIds)));
   res.json({ data });
 });
 
 const getOne = asyncHandler(async (req, res) => {
   const rec = await Team.get(req.params.id);
   if (!rec) throw notFound('Team not found');
-  const callerTeamId = await resolveCallerTeamId(req.user);
-  res.json({ data: await teamWithMembers(rec, req.user, callerTeamId) });
+  const callerTeamIds = await resolveCallerTeamIds(req.user);
+  res.json({ data: await teamWithMembers(rec, req.user, callerTeamIds) });
 });
 
 const create = asyncHandler(async (req, res) => {
@@ -216,8 +215,8 @@ const create = asyncHandler(async (req, res) => {
   }
   try {
     const rec = await Team.create(toFields(body));
-    const callerTeamId = await resolveCallerTeamId(req.user);
-    res.status(201).json({ data: await teamWithMembers(rec, req.user, callerTeamId) });
+    const callerTeamIds = await resolveCallerTeamIds(req.user);
+    res.status(201).json({ data: await teamWithMembers(rec, req.user, callerTeamIds) });
   } catch (err) {
     if (err && err.code === '23505') throw conflict('Team name already exists', 'TEAM_NAME_EXISTS');
     throw err;
@@ -233,8 +232,8 @@ const update = asyncHandler(async (req, res) => {
   }
   try {
     const updated = await Team.update(rec.id, toFields(req.body));
-    const callerTeamId = await resolveCallerTeamId(req.user);
-    res.json({ data: await teamWithMembers(updated, req.user, callerTeamId) });
+    const callerTeamIds = await resolveCallerTeamIds(req.user);
+    res.json({ data: await teamWithMembers(updated, req.user, callerTeamIds) });
   } catch (err) {
     if (err && err.code === '23505') throw conflict('Team name already exists', 'TEAM_NAME_EXISTS');
     throw err;

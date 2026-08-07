@@ -49,7 +49,8 @@ async function reassignUploadOwnerFromUrl(url, newEmployeeId) {
 function canAccessUpload(uploadMeta, caller) {
   if (!uploadMeta || !caller) return false;
   if (uploadMeta.purpose === 'photo') return true;
-  if (caller.role === 'HR Admin') return true;
+  // HR Admin or Leadership team (CEO etc.) may view CNIC scans company-wide.
+  if (caller.role === 'HR Admin' || caller.isLeadership) return true;
   return caller.id === uploadMeta.employee_id;
 }
 

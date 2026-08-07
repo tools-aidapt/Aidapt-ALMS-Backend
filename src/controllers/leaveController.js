@@ -74,7 +74,7 @@ const getOne = asyncHandler(async (req, res) => {
   const request = await leaveService.getById(req.params.id);
   const isOwner = request.employee.includes(req.user.id);
   const isApprover = request.manager.includes(req.user.id);
-  const isHrAdmin = req.user.role === ROLES.HR_ADMIN;
+  const isHrAdmin = req.user.role === ROLES.HR_ADMIN || req.user.isLeadership;
   if (!isOwner && !isApprover && !isHrAdmin) throw forbidden();
   res.json({ data: request });
 });
@@ -109,11 +109,12 @@ const decide = asyncHandler(async (req, res) => {
 const balances = asyncHandler(async (req, res) => {
   const targetId = req.params.employeeId;
   const isSelf = req.user.id === targetId;
-  const isHrAdmin = req.user.role === ROLES.HR_ADMIN;
+  const { hasCompanyWideDataAccess } = require('../utils/leadershipAccess');
+  const companyWide = hasCompanyWideDataAccess(req.user);
   const isManager = req.user.role === ROLES.MANAGER;
 
-  if (!isSelf && !isHrAdmin && !isManager) throw forbidden();
-  if (isManager && !isSelf) {
+  if (!isSelf && !companyWide && !isManager) throw forbidden();
+  if (isManager && !isSelf && !companyWide) {
     const target = await Employee.get(targetId);
     if (!target) throw notFound('Employee not found');
     if (!(target.fields.Manager || []).includes(req.user.id)) {
@@ -124,7 +125,6 @@ const balances = asyncHandler(async (req, res) => {
   const data = await leaveService.balancesFor(targetId);
   res.json({ data });
 });
-
 // HR Admin sets an employee's leave balance (absolute values).
 const setBalance = asyncHandler(async (req, res) => {
   const data = await leaveService.setBalance(req.params.employeeId, req.body);

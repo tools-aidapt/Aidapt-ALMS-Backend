@@ -3,6 +3,7 @@
 const Employee = require('../models/Employee');
 const { verifySupabaseToken } = require('../utils/supabaseJwt');
 const { unauthorized, forbidden } = require('./errorHandler');
+const { isLeadershipMember } = require('../utils/leadershipAccess');
 
 /**
  * Verify the Supabase access token (asymmetric ES256/RS256 against the project
@@ -33,15 +34,22 @@ async function authenticate(req, res, next) {
     return next(unauthorized('Invalid or expired token', 'UNAUTHENTICATED'));
   }
 
-  // Fast path: role travels in the token, no DB round-trip.
+  // Fast path: role travels in the token; still resolve Leadership membership
+  // so company-wide data access works without a custom JWT claim.
   if (payload.app_role) {
-    req.user = {
-      id: payload.sub,
-      email: payload.email || null,
-      role: payload.app_role,
-      name: (payload.user_metadata && payload.user_metadata.name) || null,
-    };
-    return next();
+    try {
+      const isLeadership = await isLeadershipMember(payload.sub);
+      req.user = {
+        id: payload.sub,
+        email: payload.email || null,
+        role: payload.app_role,
+        name: (payload.user_metadata && payload.user_metadata.name) || null,
+        isLeadership,
+      };
+      return next();
+    } catch (err) {
+      return next(err);
+    }
   }
 
   try {
@@ -52,11 +60,13 @@ async function authenticate(req, res, next) {
     if (employee.fields.Status === 'Inactive') {
       return next(unauthorized('Account is inactive', 'ACCOUNT_INACTIVE'));
     }
+    const isLeadership = await isLeadershipMember(employee.id);
     req.user = {
       id: employee.id,
       email: employee.fields.Email,
       role: employee.fields.Role,
       name: employee.fields.Name,
+      isLeadership,
     };
     return next();
   } catch (err) {
@@ -75,6 +85,18 @@ function requireRole(...allowed) {
   };
 }
 
+/**
+ * Like requireRole, but Leadership team members also pass (CEO company-wide access).
+ * Must run after authenticate() so req.user.isLeadership is set.
+ */
+function requireRoleOrLeadership(...allowed) {
+  return (req, res, next) => {
+    if (!req.user) return next(unauthorized());
+    if (req.user.isLeadership || allowed.includes(req.user.role)) return next();
+    return next(forbidden(`Requires role: ${allowed.join(' or ')} (or Leadership team)`));
+  };
+}
+
 const ROLES = { EMPLOYEE: 'Employee', MANAGER: 'Manager', HR_ADMIN: 'HR Admin' };
 
-module.exports = { authenticate, requireRole, ROLES };
+module.exports = { authenticate, requireRole, requireRoleOrLeadership, ROLES };

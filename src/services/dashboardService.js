@@ -7,6 +7,7 @@ const strikeService = require('./strikeService');
 const { todayPktDateStr, pktHm, formatHoursMinutes } = require('../utils/dateUtils');
 const { notFound } = require('../middleware/errorHandler');
 const { ROLES } = require('../middleware/auth');
+const { isLeadershipMember } = require('../utils/leadershipAccess');
 
 /** Shape today's punch for the dashboard (or null if not checked in). */
 function mapTodayPunch(punch) {
@@ -77,13 +78,21 @@ async function getDashboard(userId) {
   const yearMonth = today.slice(0, 7);
   const role = employee.fields.Role;
   const managerId = (employee.fields.Manager || [])[0] || null;
-  const isManagerRole = role === ROLES.MANAGER || role === ROLES.HR_ADMIN;
+  const leadership = await isLeadershipMember(userId);
+  const companyWide = role === ROLES.HR_ADMIN || leadership;
+  const isManagerRole = role === ROLES.MANAGER || role === ROLES.HR_ADMIN || leadership;
 
   const [manager, balance, todayPunch, reports, monthlyStrike] = await Promise.all([
     managerId ? Employee.get(managerId) : Promise.resolve(null),
     LeaveBalance.findForEmployee(userId),
     AttendancePunch.findForEmployeeOnDate(userId, today),
-    isManagerRole ? Employee.findDirectReports(userId) : Promise.resolve([]),
+    companyWide
+      ? Employee.list({ sort: [{ field: 'Name', direction: 'asc' }] }).then((rows) =>
+          rows.filter((r) => r.id !== userId)
+        )
+      : isManagerRole
+        ? Employee.findDirectReports(userId)
+        : Promise.resolve([]),
     strikeService.recomputeForEmployeeMonth(userId, yearMonth),
   ]);
 

@@ -12,14 +12,26 @@ const Team = makeModel({
   },
 });
 
-/** Active members of a team (including the lead if they share team_id). */
-Team.findMembers = function findMembers(teamId) {
+/**
+ * Active members of a team: join table membership, plus the team lead if active
+ * (lead may not be listed in employee_teams yet).
+ */
+Team.findMembers = async function findMembers(teamId) {
   const Employee = require('./Employee');
-  return Employee.selectWhere(
-    "team_id = $1 AND status = 'Active'",
-    [teamId],
-    'ORDER BY name ASC'
+  const { rows } = await query(
+    `SELECT DISTINCT e.*
+       FROM employees e
+      WHERE e.status = 'Active'
+        AND (
+          e.id IN (SELECT employee_id FROM employee_teams WHERE team_id = $1)
+          OR e.id = (SELECT lead_id FROM teams WHERE id = $1)
+        )
+      ORDER BY e.name ASC`,
+    [teamId]
   );
+  const records = rows.map((r) => Employee.rowToRecord(r));
+  await Employee.hydrateTeams(records);
+  return records;
 };
 
 /** Lookup by exact name (case-insensitive). */

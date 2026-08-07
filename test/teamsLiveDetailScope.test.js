@@ -90,6 +90,7 @@ describe('GET /api/teams live detail scoping', () => {
   let origList;
   let origFindMembers;
   let origGet;
+  let origListTeamIds;
 
   function mockRes() {
     const res = {
@@ -122,6 +123,7 @@ describe('GET /api/teams live detail scoping', () => {
     origList = Team.list;
     origFindMembers = Team.findMembers;
     origGet = Employee.get;
+    origListTeamIds = Employee.listTeamIds;
 
     Team.list = async () => [
       { id: TEAM_A, fields: { Name: 'Alpha', Lead: [LEAD], CreatedAt: null }, createdTime: null },
@@ -147,13 +149,11 @@ describe('GET /api/teams live detail scoping', () => {
     Team.list = origList;
     Team.findMembers = origFindMembers;
     Employee.get = origGet;
+    Employee.listTeamIds = origListTeamIds;
   });
 
   test('member of Team A gets live keys on A and redacted on B', async () => {
-    Employee.get = async (id) => {
-      if (id === EMP) return { id: EMP, fields: { Team: [TEAM_A] } };
-      return null;
-    };
+    Employee.listTeamIds = async (id) => (id === EMP ? [TEAM_A] : []);
 
     const LeaveBalance = require('../src/models/LeaveBalance');
     const AttendancePunch = require('../src/models/AttendancePunch');
@@ -191,7 +191,7 @@ describe('GET /api/teams live detail scoping', () => {
   });
 
   test('HR Admin gets live detail on every team', async () => {
-    Employee.get = async () => ({ id: HR, fields: { Team: [] } });
+    Employee.listTeamIds = async () => [];
     const LeaveBalance = require('../src/models/LeaveBalance');
     const AttendancePunch = require('../src/models/AttendancePunch');
     const db = require('../src/config/db');
@@ -217,8 +217,8 @@ describe('GET /api/teams live detail scoping', () => {
   });
 
   test('team lead gets live detail only for led team', async () => {
-    Employee.get = async () => ({ id: LEAD, fields: { Team: [TEAM_B] } });
     // Lead of A is LEAD; membership is B — can see A as lead and B as member.
+    Employee.listTeamIds = async () => [TEAM_B];
     const LeaveBalance = require('../src/models/LeaveBalance');
     const AttendancePunch = require('../src/models/AttendancePunch');
     const db = require('../src/config/db');
@@ -236,6 +236,31 @@ describe('GET /api/teams live detail scoping', () => {
       const beta = res.body.data.find((t) => t.id === TEAM_B);
       assert.ok(alpha.members[0].balances);
       assert.ok(beta.members[0].balances);
+    } finally {
+      LeaveBalance.selectWhere = origBal;
+      AttendancePunch.forEmployeesOnDate = origPunch;
+      db.query = origDbQuery;
+    }
+  });
+
+  test('member of multiple teams sees live detail on each', async () => {
+    Employee.listTeamIds = async (id) => (id === EMP ? [TEAM_A, TEAM_B] : []);
+    const LeaveBalance = require('../src/models/LeaveBalance');
+    const AttendancePunch = require('../src/models/AttendancePunch');
+    const db = require('../src/config/db');
+    const origBal = LeaveBalance.selectWhere;
+    const origPunch = AttendancePunch.forEmployeesOnDate;
+    const origDbQuery = db.query;
+    LeaveBalance.selectWhere = async () => [];
+    AttendancePunch.forEmployeesOnDate = async () => [];
+    db.query = async () => ({ rows: [] });
+    try {
+      const res = await invoke(teamCtrl.list, {
+        user: { id: EMP, role: ROLES.EMPLOYEE },
+      });
+      for (const team of res.body.data) {
+        assert.ok(team.members[0].balances, `expected live detail on ${team.id}`);
+      }
     } finally {
       LeaveBalance.selectWhere = origBal;
       AttendancePunch.forEmployeesOnDate = origPunch;

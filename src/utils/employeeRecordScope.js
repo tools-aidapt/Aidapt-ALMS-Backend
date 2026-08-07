@@ -3,6 +3,7 @@
 const Employee = require('../models/Employee');
 const { ROLES } = require('../middleware/auth');
 const { forbidden, notFound } = require('../middleware/errorHandler');
+const { hasCompanyWideDataAccess } = require('./leadershipAccess');
 
 /**
  * Resolve the single employee id a "My Records"-style list endpoint may return.
@@ -10,13 +11,13 @@ const { forbidden, notFound } = require('../middleware/errorHandler');
  * Contract (caller always from bearer token):
  * - employeeId omitted or = self → caller's own id (every role)
  * - employeeId = another employee:
- *     Employee  → 403
+ *     Employee  → 403 (unless Leadership)
  *     Manager   → allowed only if target reports to caller, else 403
- *     HR Admin  → allowed
+ *     HR Admin / Leadership team → allowed
  *
  * Always returns exactly one employee id. Never "everyone".
  *
- * @param {{id: string, role: string}} caller
+ * @param {{id: string, role: string, isLeadership?: boolean}} caller
  * @param {string|undefined|null} requestedEmployeeId
  * @param {{getEmployee?: (id: string) => Promise<object|null>}} [deps] test seam
  * @returns {Promise<string>}
@@ -29,14 +30,15 @@ async function resolveEmployeeRecordScope(caller, requestedEmployeeId, deps = {}
     return caller.id;
   }
 
-  if (caller.role === ROLES.EMPLOYEE) {
-    throw forbidden('Not your records');
-  }
-
-  if (caller.role === ROLES.HR_ADMIN) {
+  // HR Admin and Leadership: any employee.
+  if (hasCompanyWideDataAccess(caller)) {
     const target = await getEmployee(requested);
     if (!target) throw notFound('Employee not found');
     return requested;
+  }
+
+  if (caller.role === ROLES.EMPLOYEE) {
+    throw forbidden('Not your records');
   }
 
   if (caller.role === ROLES.MANAGER) {

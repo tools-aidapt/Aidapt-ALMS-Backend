@@ -287,8 +287,10 @@ async function buildRows(employees, from, to, teamNameById = new Map(), leaveByE
     for (const p of punches) {
       byDate.set(String(p.fields.Date).slice(0, 10), p);
     }
-    const teamId = (emp.fields.Team && emp.fields.Team[0]) || null;
-    const teamName = teamId ? teamNameById.get(teamId) || null : null;
+    const teamIds = emp.fields.Team || [];
+    const teamId = teamIds[0] || null;
+    const names = teamIds.map((id) => teamNameById.get(id)).filter(Boolean);
+    const teamName = names.length ? names.join(', ') : null;
     const leaveSet = leaveMap.get(emp.id) || new Set();
     for (const d of dates) {
       rows.push(rowFromPunch(emp, byDate.get(d) || null, d, teamName, leaveSet.has(d)));
@@ -382,8 +384,8 @@ async function scopedEmployees(recipient, teamIds) {
   if (teamIds && teamIds.length) {
     const allow = new Set(teamIds);
     employees = employees.filter((e) => {
-      const tid = (e.fields.Team && e.fields.Team[0]) || null;
-      return tid && allow.has(tid);
+      const tids = e.fields.Team || [];
+      return tids.some((tid) => allow.has(tid));
     });
   }
 

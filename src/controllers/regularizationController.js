@@ -67,7 +67,7 @@ const getOne = asyncHandler(async (req, res) => {
   const request = await regularizationService.getById(req.params.id);
   const isOwner = request.employee.includes(req.user.id);
   const isApprover = request.manager.includes(req.user.id);
-  const isHrAdmin = req.user.role === ROLES.HR_ADMIN;
+  const isHrAdmin = req.user.role === ROLES.HR_ADMIN || req.user.isLeadership;
   if (!isOwner && !isApprover && !isHrAdmin) throw forbidden();
   res.json({ data: request });
 });

@@ -231,7 +231,7 @@ async function decideInApp(requestId, action, caller) {
     throw forbidden('You cannot decide your own regularization request');
   }
 
-  const isHrAdmin = caller.role === 'HR Admin';
+  const isHrAdmin = caller.role === 'HR Admin' || Boolean(caller.isLeadership);
   const isAssignedManager = (request.fields.Manager || []).includes(caller.id);
   if (!isHrAdmin && !isAssignedManager) {
     throw forbidden('You are not the approver for this request');
@@ -260,21 +260,28 @@ async function list({ employeeId, managerId, status, excludeEmployeeId } = {}) {
 }
 
 /**
- * Approver inbox: Pending requests for reports (Manager) or company-wide (HR),
+ * Approver inbox: Pending for reports (Manager) or company-wide (HR / Leadership),
  * never including the caller's own submissions.
  */
 async function listPendingForApprover(caller) {
-  if (caller.role === 'Employee') {
+  const { hasCompanyWideDataAccess } = require('../utils/leadershipAccess');
+  if (caller.role === 'Employee' && !hasCompanyWideDataAccess(caller)) {
+    throw forbidden('Employees do not have a regularization approval queue');
+  }
+  if (
+    !hasCompanyWideDataAccess(caller) &&
+    caller.role !== 'Manager' &&
+    caller.role !== 'HR Admin'
+  ) {
     throw forbidden('Employees do not have a regularization approval queue');
   }
   const filters = {
     status: 'Pending',
     excludeEmployeeId: caller.id,
   };
-  if (caller.role === 'Manager') {
+  if (!hasCompanyWideDataAccess(caller) && caller.role === 'Manager') {
     filters.managerId = caller.id;
   }
-  // Use module.exports.list so tests can stub the list layer.
   return module.exports.list(filters);
 }
 

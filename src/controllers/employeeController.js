@@ -14,6 +14,7 @@ const {
   applyProfileBodyToFields,
   attachPrivateProfileFields,
 } = require('../utils/employeeProfileFields');
+const { hasCompanyWideDataAccess } = require('../utils/leadershipAccess');
 const uploadService = require('../services/uploadService');
 
 const ROLE_VALUES = ['Employee', 'Manager', 'HR Admin'];
@@ -27,6 +28,8 @@ const schemas = {
     managerId: z.string().optional(),
     shiftId: z.string().optional(),
     teamId: z.string().uuid().optional(),
+    /** Multi-team membership; when set, replaces all team links (preferred over teamId). */
+    teamIds: z.array(z.string().uuid()).optional(),
     dateOfJoining: z.string().optional(),
     monthlySalary: z.number().nonnegative().optional(),
     photoUrl: z.string().optional(),
@@ -41,6 +44,7 @@ const schemas = {
       managerId: z.string().nullable().optional(),
       shiftId: z.string().nullable().optional(),
       teamId: z.string().uuid().nullable().optional(),
+      teamIds: z.array(z.string().uuid()).optional(),
       status: z.enum(['Active', 'Inactive']).optional(),
       monthlySalary: z.number().nonnegative().optional(),
       photoUrl: z.string().nullable().optional(),
@@ -66,14 +70,15 @@ const schemas = {
 
 /**
  * Shape an employee for output. Sensitive profile fields (DOB, medical, CNIC,
- * bank, salary, contact) are only included for HR Admin or the employee
- * viewing their own record — Managers of reports get the public shape without
- * those keys.
+ * bank, salary, contact) are only included for HR Admin, Leadership team, or
+ * the employee viewing their own record — Managers of reports get the public
+ * shape without those keys.
  */
 function serialize(rec, caller) {
   const f = rec.fields;
   const canSeePrivate =
-    caller && (caller.role === ROLES.HR_ADMIN || caller.id === rec.id);
+    caller &&
+    (hasCompanyWideDataAccess(caller) || caller.id === rec.id);
   const out = {
     id: rec.id,
     name: f.Name,
@@ -96,13 +101,15 @@ function serialize(rec, caller) {
   return out;
 }
 
-// HR Admin sees the full directory; a Manager sees only their direct reports.
+// HR Admin / Leadership: full directory. Manager: direct reports only.
 const list = asyncHandler(async (req, res) => {
   let records;
-  if (req.user.role === ROLES.MANAGER) {
+  if (hasCompanyWideDataAccess(req.user)) {
+    records = await Employee.list({ sort: [{ field: 'Name', direction: 'asc' }] });
+  } else if (req.user.role === ROLES.MANAGER) {
     records = await Employee.findDirectReports(req.user.id);
   } else {
-    records = await Employee.list({ sort: [{ field: 'Name', direction: 'asc' }] });
+    throw forbidden('Requires Manager, HR Admin, or Leadership team membership');
   }
   res.json({ data: records.map((r) => serialize(r, req.user)) });
 });
@@ -112,18 +119,18 @@ const getOne = asyncHandler(async (req, res) => {
   if (!rec) throw notFound('Employee not found');
 
   const isSelf = req.user.id === rec.id;
-  const isPrivileged =
-    req.user.role === ROLES.HR_ADMIN || req.user.role === ROLES.MANAGER;
-  if (!isSelf && !isPrivileged) throw forbidden();
-  // A Manager may only view their own reports.
-  if (req.user.role === ROLES.MANAGER && !isSelf) {
-    const isReport = (rec.fields.Manager || []).includes(req.user.id);
-    if (!isReport) throw forbidden('Not one of your reports');
+  if (hasCompanyWideDataAccess(req.user) || isSelf) {
+    return res.json({ data: serialize(rec, req.user) });
   }
 
-  res.json({ data: serialize(rec, req.user) });
-});
+  if (req.user.role === ROLES.MANAGER) {
+    const isReport = (rec.fields.Manager || []).includes(req.user.id);
+    if (!isReport) throw forbidden('Not one of your reports');
+    return res.json({ data: serialize(rec, req.user) });
+  }
 
+  throw forbidden();
+});
 const create = asyncHandler(async (req, res) => {
   const body = req.body;
 
@@ -145,7 +152,14 @@ const create = asyncHandler(async (req, res) => {
     };
     if (body.managerId) fields.Manager = [body.managerId];
     if (body.shiftId) fields.AssignedShift = [body.shiftId];
-    if (body.teamId) fields.Team = [body.teamId];
+    // Multi-team via createWithId → setTeamIds; teamIds preferred over teamId.
+    const membership =
+      body.teamIds !== undefined
+        ? body.teamIds
+        : body.teamId
+          ? [body.teamId]
+          : undefined;
+    if (membership !== undefined) fields.Team = membership;
     if (body.dateOfJoining) fields.DateOfJoining = body.dateOfJoining;
     if (body.monthlySalary !== undefined) fields.MonthlySalary = body.monthlySalary;
     if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
@@ -198,21 +212,25 @@ const update = asyncHandler(async (req, res) => {
   if (body.shiftId !== undefined) {
     fields.AssignedShift = body.shiftId ? [body.shiftId] : [];
   }
-  if (body.teamId !== undefined) {
-    fields.Team = body.teamId ? [body.teamId] : [];
-  }
+  // team membership handled after update (join table); do not write team_id alone.
   if (body.photoUrl !== undefined) fields.PhotoUrl = body.photoUrl;
   if (body.employmentStatus !== undefined) fields.EmploymentStatus = body.employmentStatus;
   if (body.graceMinutes !== undefined) fields.GraceMinutes = body.graceMinutes;
   applyProfileBodyToFields(body, fields);
 
   const updated = await Employee.update(rec.id, fields);
+  if (body.teamIds !== undefined) {
+    await Employee.setTeamIds(rec.id, body.teamIds);
+  } else if (body.teamId !== undefined) {
+    await Employee.setTeamIds(rec.id, body.teamId ? [body.teamId] : []);
+  }
+  const withTeams = await Employee.get(rec.id);
   await Promise.all([
     uploadService.reassignUploadOwnerFromUrl(body.cnicFrontUrl, rec.id),
     uploadService.reassignUploadOwnerFromUrl(body.cnicBackUrl, rec.id),
     uploadService.reassignUploadOwnerFromUrl(body.photoUrl, rec.id),
   ]);
-  res.json({ data: serialize(updated, req.user) });
+  res.json({ data: serialize(withTeams || updated, req.user) });
 });
 
 // Self-service profile edit. Any authenticated employee may update their OWN
