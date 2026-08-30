@@ -21,6 +21,11 @@ router.post(
   ctrl.checkOut
 );
 router.get('/overview', validate(ctrl.schemas.overviewQuery, 'query'), ctrl.overview);
+router.get(
+  '/month-end-report',
+  validate(ctrl.schemas.monthEndReportQuery, 'query'),
+  ctrl.monthEndReport
+);
 router.get('/', validate(ctrl.schemas.listQuery, 'query'), ctrl.list);
 router.get('/:id', ctrl.getOne);
 

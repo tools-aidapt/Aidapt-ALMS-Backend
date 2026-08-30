@@ -4,6 +4,8 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildEmployeeMonthlyInsight,
+  toMonthEndReport,
+  latesFromRows,
   averageHm,
   addCalendarMonths,
   PROBATION_MONTHS,
@@ -281,5 +283,229 @@ describe('addCalendarMonths', () => {
   test('adds months and clamps day', () => {
     assert.equal(addCalendarMonths('2026-01-31', 1), '2026-02-28');
     assert.equal(addCalendarMonths('2026-04-01', 3), '2026-07-01');
+  });
+});
+
+describe('latesFromRows', () => {
+  test('returns punch-based lates with date and check-in, sorted by date', () => {
+    const lates = latesFromRows([
+      row({
+        date: '2026-07-03',
+        status: 'Present',
+        isLate: true,
+        checkInTime: '09:40',
+        lateByMinutes: 25,
+      }),
+      row({ date: '2026-07-01', status: 'Present', isLate: false, checkInTime: '09:00' }),
+      row({
+        date: '2026-07-02',
+        status: 'Present',
+        isLate: true,
+        checkInTime: '09:12',
+        lateByMinutes: 7,
+      }),
+    ]);
+    assert.equal(lates.length, 2);
+    assert.deepEqual(lates[0], {
+      date: '2026-07-02',
+      checkInTime: '09:12',
+      lateByMinutes: 7,
+    });
+    assert.deepEqual(lates[1], {
+      date: '2026-07-03',
+      checkInTime: '09:40',
+      lateByMinutes: 25,
+    });
+  });
+});
+
+describe('toMonthEndReport', () => {
+  test('maps insight + late punches; includes leave reason; lateCount is punch-based', () => {
+    const empRows = [
+      row({
+        date: '2026-07-01',
+        status: 'Present',
+        mode: 'Office',
+        workedMinutes: 540,
+        isLate: true,
+        checkInTime: '09:22',
+        lateByMinutes: 7,
+      }),
+      row({ date: '2026-07-02', status: 'On Leave' }),
+      row({
+        date: '2026-07-03',
+        status: 'Present',
+        mode: 'Remote',
+        workedMinutes: 480,
+        isLate: false,
+        checkInTime: '09:00',
+      }),
+    ];
+
+    const insight = buildEmployeeMonthlyInsight(EMP, empRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(['2026-07-02']),
+      shift: shift9to18,
+      leaveMeta: {
+        taken: { annual: 0, sick: 0, casual: 1 },
+        items: [
+          {
+            leaveType: 'Casual',
+            fromDate: '2026-07-02',
+            toDate: '2026-07-02',
+            daysInPeriod: 1,
+            totalDays: 1,
+            reason: 'Personal work',
+          },
+        ],
+      },
+      leaveBalances: { annual: 10, sick: 5, casual: 1 },
+      strikeInfo: { lateCount: 99, strikeCount: 3, items: [] },
+    });
+
+    const report = toMonthEndReport(insight, empRows, { monthlySalary: 90000 });
+    assert.equal(report.employeeName, 'Alice');
+    assert.equal(report.expectedWorkingDays, 3);
+    assert.equal(report.workedDays, 2);
+    assert.equal(report.leaveDays, 1);
+    assert.equal(report.lateCount, 1);
+    assert.deepEqual(report.lates, [
+      { date: '2026-07-01', checkInTime: '09:22', lateByMinutes: 7 },
+    ]);
+    assert.deepEqual(report.leaveTaken, { annual: 0, sick: 0, casual: 1 });
+    assert.equal(report.leaveItems.length, 1);
+    assert.equal(report.leaveItems[0].reason, 'Personal work');
+    assert.equal(report.leaveItems[0].leaveType, 'Casual');
+    assert.deepEqual(report.leaveBalances, { annual: 10, sick: 5, casual: 1 });
+    assert.equal(report.monthlySalary, 90000);
+    assert.equal(report.payableDays, 3);
+    assert.equal(report.payableAmount, 90000);
+    assert.equal(report.unpaidDays, 0);
+    assert.equal(report.onProbation, false);
+  });
+
+  test('full-time applied leave is paid (no salary cut)', () => {
+    const empRows = [
+      row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+      row({ date: '2026-07-02', status: 'On Leave' }),
+      row({ date: '2026-07-03', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+    ];
+    const insight = buildEmployeeMonthlyInsight(EMP, empRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(['2026-07-02']),
+      shift: shift9to18,
+      leaveMeta: { taken: { annual: 1, sick: 0, casual: 0 }, items: [] },
+      leaveBalances: { annual: 9, sick: 5, casual: 2 },
+    });
+    const report = toMonthEndReport(insight, empRows, { monthlySalary: 90000 });
+    assert.equal(report.leaveDays, 1);
+    assert.equal(report.absentDays, 0);
+    assert.equal(report.payableDays, 3);
+    assert.equal(report.payableAmount, 90000);
+    assert.equal(report.unpaidDays, 0);
+  });
+
+  test('probation leave and absences are unpaid', () => {
+    const empRows = [
+      row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+      row({ date: '2026-07-02', status: 'On Leave' }),
+      row({ date: '2026-07-03', status: 'Absent' }),
+    ];
+    const insight = buildEmployeeMonthlyInsight(EMP_PROBATION, empRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(['2026-07-02']),
+      shift: shift9to18,
+      leaveMeta: { taken: { annual: 0, sick: 0, casual: 1 }, items: [] },
+      leaveBalances: { annual: 10, sick: 5, casual: 4 },
+    });
+    const report = toMonthEndReport(insight, empRows, { monthlySalary: 40000 });
+    assert.equal(report.onProbation, true);
+    assert.equal(report.workedDays, 1);
+    assert.equal(report.leaveDays, 1);
+    assert.equal(report.absentDays, 1);
+    assert.equal(report.payableDays, 1);
+    assert.equal(report.unpaidDays, 2);
+    assert.equal(report.absenceCoverage.fromCasual, 0);
+    assert.equal(report.absenceCoverage.fromAnnual, 0);
+    assert.equal(report.payableAmount, 13333.33);
+  });
+
+  test('full-time unauthorized absence covers Casual then Annual', () => {
+    const empRows = [
+      row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+      row({ date: '2026-07-02', status: 'Absent' }),
+      row({ date: '2026-07-03', status: 'Absent' }),
+    ];
+    const insight = buildEmployeeMonthlyInsight(EMP, empRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(),
+      shift: shift9to18,
+      leaveBalances: { annual: 10, sick: 5, casual: 1 },
+    });
+    const report = toMonthEndReport(insight, empRows, { monthlySalary: 90000 });
+    assert.equal(report.workedDays, 1);
+    assert.equal(report.absentDays, 2);
+    assert.equal(report.absenceCoverage.fromCasual, 1);
+    assert.equal(report.absenceCoverage.fromAnnual, 1);
+    assert.equal(report.unpaidDays, 0);
+    assert.equal(report.payableDays, 3);
+    assert.equal(report.payableAmount, 90000);
+    assert.deepEqual(report.leaveBalancesAfterCoverage, { annual: 9, sick: 5, casual: 0 });
+  });
+
+  test('full-time remaining absences after leave is exhausted are unpaid', () => {
+    const empRows = [
+      row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+      row({ date: '2026-07-02', status: 'Absent' }),
+      row({ date: '2026-07-03', status: 'Absent' }),
+    ];
+    const insight = buildEmployeeMonthlyInsight(EMP, empRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(),
+      shift: shift9to18,
+      leaveBalances: { annual: 0, sick: 5, casual: 1 },
+    });
+    const report = toMonthEndReport(insight, empRows, { monthlySalary: 90000 });
+    assert.equal(report.absenceCoverage.fromCasual, 1);
+    assert.equal(report.absenceCoverage.fromAnnual, 0);
+    assert.equal(report.unpaidDays, 1);
+    assert.equal(report.payableDays, 2);
+    assert.equal(report.payableAmount, 60000);
+  });
+
+  test('payableAmount is null when salary is missing', () => {
+    const empRows = [
+      row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+    ];
+    const insight = buildEmployeeMonthlyInsight(EMP, empRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(),
+      shift: shift9to18,
+    });
+    const report = toMonthEndReport(insight, empRows);
+    assert.equal(report.leaveDays, 0);
+    assert.equal(report.payableDays, 1);
+    assert.equal(report.monthlySalary, null);
+    assert.equal(report.payableAmount, null);
+  });
+
+  test('payableAmount prorates when absents reduce payable days', () => {
+    const empRows = [
+      row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+      row({ date: '2026-07-02', status: 'Absent' }),
+      row({ date: '2026-07-03', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+    ];
+    const insight = buildEmployeeMonthlyInsight(EMP, empRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(),
+      shift: shift9to18,
+    });
+    const report = toMonthEndReport(insight, empRows, { monthlySalary: 90000 });
+    assert.equal(report.expectedWorkingDays, 3);
+    assert.equal(report.workedDays, 2);
+    assert.equal(report.leaveDays, 0);
+    assert.equal(report.payableDays, 2);
+    assert.equal(report.payableAmount, 60000);
+    assert.equal(report.unpaidDays, 1);
   });
 });

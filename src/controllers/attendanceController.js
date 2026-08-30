@@ -3,7 +3,11 @@
 const { z } = require('zod');
 const { asyncHandler } = require('../utils/asyncHandler');
 const attendanceService = require('../services/attendanceService');
+const reportService = require('../services/reportService');
 const { resolveEmployeeRecordScope } = require('../utils/employeeRecordScope');
+const { hasCompanyWideDataAccess } = require('../utils/leadershipAccess');
+const { forbidden } = require('../middleware/errorHandler');
+const { todayPktDateStr } = require('../utils/dateUtils');
 
 const schemas = {
   checkin: z.object({
@@ -21,6 +25,10 @@ const schemas = {
     employeeId: z.string().optional(),
     from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD').optional(),
     to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD').optional(),
+  }),
+  monthEndReportQuery: z.object({
+    month: z.string().regex(/^\d{4}-\d{2}$/, 'expected YYYY-MM').optional(),
+    scope: z.enum(['self', 'all']).optional(),
   }),
 };
 
@@ -76,4 +84,27 @@ const overview = asyncHandler(async (req, res) => {
   res.json({ data });
 });
 
-module.exports = { checkIn, checkOut, list, getOne, overview, schemas };
+/**
+ * On-demand month-end JSON summary.
+ * Default scope=self (own report). scope=all is HR Admin / Leadership only.
+ */
+const monthEndReport = asyncHandler(async (req, res) => {
+  const scope = req.query.scope === 'all' ? 'all' : 'self';
+  if (scope === 'all' && !hasCompanyWideDataAccess(req.user)) {
+    throw forbidden('Company-wide month-end report requires HR Admin or Leadership');
+  }
+
+  const month = req.query.month;
+  const { from, to } = reportService.monthBoundsPkt(month ? `${month}-01` : todayPktDateStr());
+  const employeeIds = scope === 'all' ? null : [req.user.id];
+  const result = await reportService.getMonthEndReports({ employeeIds, from, to });
+  res.json({
+    data: {
+      period: result.period,
+      scope,
+      reports: result.reports,
+    },
+  });
+});
+
+module.exports = { checkIn, checkOut, list, getOne, overview, monthEndReport, schemas };

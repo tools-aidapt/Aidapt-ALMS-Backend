@@ -48,17 +48,32 @@ const Employee = makeModel({
 Employee.teamIdsByEmployee = async function teamIdsByEmployee(employeeIds) {
   const map = new Map();
   if (!employeeIds || !employeeIds.length) return map;
-  const { rows } = await query(
-    `SELECT employee_id, team_id
-       FROM employee_teams
-      WHERE employee_id = ANY($1::uuid[])
-      ORDER BY created_at ASC, team_id ASC`,
-    [employeeIds]
-  );
-  for (const r of rows) {
-    const list = map.get(r.employee_id) || [];
-    list.push(r.team_id);
-    map.set(r.employee_id, list);
+  try {
+    const { rows } = await query(
+      `SELECT employee_id, team_id
+         FROM employee_teams
+        WHERE employee_id = ANY($1::uuid[])
+        ORDER BY created_at ASC, team_id ASC`,
+      [employeeIds]
+    );
+    for (const r of rows) {
+      const list = map.get(r.employee_id) || [];
+      list.push(r.team_id);
+      map.set(r.employee_id, list);
+    }
+  } catch (err) {
+    // 42P01 = undefined_table — fall back to denormalised employees.team_id
+    // until db/employee_teams.sql is applied.
+    if (!err || err.code !== '42P01') throw err;
+    const { rows } = await query(
+      `SELECT id AS employee_id, team_id
+         FROM employees
+        WHERE id = ANY($1::uuid[]) AND team_id IS NOT NULL`,
+      [employeeIds]
+    );
+    for (const r of rows) {
+      map.set(r.employee_id, [r.team_id]);
+    }
   }
   return map;
 };

@@ -31,14 +31,13 @@ async function main() {
   ).rows[0];
   if (!emp) throw new Error('Muhammad Ateeb not found');
 
-  const punch = (
+  const existing = (
     await query(
       `SELECT id, check_out_time FROM attendance_punches
        WHERE employee_id = $1 AND date = $2`,
       [emp.id, today]
     )
   ).rows[0];
-  if (!punch) throw new Error(`No punch for ${today}`);
 
   const shift = {
     fields: {
@@ -48,28 +47,34 @@ async function main() {
     },
   };
 
-  const checkIn = pktToUtcIso(today, 10, 15); // 10:15 AM PKT
+  const checkIn = pktToUtcIso(today, 10, 14); // 10:14 AM PKT
   const lateness = computeLateness(shift, checkIn);
-  const worked = computeWorked(checkIn, punch.check_out_time, shiftLengthHours(shift));
+  const worked = computeWorked(checkIn, existing?.check_out_time || null, shiftLengthHours(shift));
 
   await query(
-    `UPDATE attendance_punches SET
-       check_in_time = $1,
-       is_late = $2,
-       late_by_minutes = $3,
-       worked_hours = $4,
-       worked_minutes = $5,
-       overtime_hours = $6,
-       status = 'Present'
-     WHERE id = $7`,
+    `INSERT INTO attendance_punches (
+       employee_id, date, check_in_time, check_out_time,
+       is_late, late_by_minutes, worked_hours, worked_minutes, overtime_hours, status, mode
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Present','Office')
+     ON CONFLICT (employee_id, date) DO UPDATE SET
+       check_in_time = EXCLUDED.check_in_time,
+       is_late = EXCLUDED.is_late,
+       late_by_minutes = EXCLUDED.late_by_minutes,
+       worked_hours = EXCLUDED.worked_hours,
+       worked_minutes = EXCLUDED.worked_minutes,
+       overtime_hours = EXCLUDED.overtime_hours,
+       status = 'Present',
+       mode = COALESCE(attendance_punches.mode, 'Office')`,
     [
+      emp.id,
+      today,
       checkIn,
+      existing?.check_out_time || null,
       lateness.isLate,
       lateness.lateByMinutes,
       worked.workedHours,
       worked.workedMinutes,
       worked.overtimeHours,
-      punch.id,
     ]
   );
 
@@ -82,7 +87,7 @@ async function main() {
         date: today,
         checkInTimePkt: pktTimeLabel(checkIn),
         checkInHmPkt: pktHm(checkIn),
-        checkOutTimePkt: pktTimeLabel(punch.check_out_time),
+        checkOutTimePkt: pktTimeLabel(existing?.check_out_time || null),
         isLate: lateness.isLate,
         lateByMinutes: lateness.lateByMinutes,
         isImmediateStrike: lateness.isImmediateStrike,

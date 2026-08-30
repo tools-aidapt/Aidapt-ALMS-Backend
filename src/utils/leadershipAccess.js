@@ -16,26 +16,32 @@ const LEADERSHIP_TEAM_NAME = 'Leadership';
 async function isLeadershipMember(employeeId, deps = {}) {
   if (!employeeId) return false;
   const run = deps.queryFn || query;
-  const { rows } = await run(
-    `SELECT 1
-       FROM teams t
-      WHERE lower(t.name) = lower($1)
-        AND (
-          t.lead_id = $2
-          OR EXISTS (
-            SELECT 1 FROM employee_teams et
-             WHERE et.team_id = t.id AND et.employee_id = $2
+  try {
+    const { rows } = await run(
+      `SELECT 1
+         FROM teams t
+        WHERE lower(t.name) = lower($1)
+          AND (
+            t.lead_id = $2
+            OR EXISTS (
+              SELECT 1 FROM employee_teams et
+               WHERE et.team_id = t.id AND et.employee_id = $2
+            )
+            -- Legacy: denormalised employees.team_id still counts until backfill is complete.
+            OR EXISTS (
+              SELECT 1 FROM employees e
+               WHERE e.id = $2 AND e.team_id = t.id
+            )
           )
-          -- Legacy: denormalised employees.team_id still counts until backfill is complete.
-          OR EXISTS (
-            SELECT 1 FROM employees e
-             WHERE e.id = $2 AND e.team_id = t.id
-          )
-        )
-      LIMIT 1`,
-    [LEADERSHIP_TEAM_NAME, employeeId]
-  );
-  return rows.length > 0;
+        LIMIT 1`,
+      [LEADERSHIP_TEAM_NAME, employeeId]
+    );
+    return rows.length > 0;
+  } catch (err) {
+    // Relation missing (migration not applied yet) — do not break login.
+    if (err && err.code === '42P01') return false;
+    throw err;
+  }
 }
 
 /**

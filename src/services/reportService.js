@@ -112,7 +112,7 @@ async function loadApprovedLeaveByEmployee(employeeIds, from, to) {
   }
 
   const { rows } = await query(
-    `SELECT employee_id, leave_type, from_date, to_date, days
+    `SELECT employee_id, leave_type, from_date, to_date, days, reason
        FROM leave_requests
       WHERE status = 'Approved'
         AND employee_id = ANY($1::uuid[])
@@ -150,6 +150,7 @@ async function loadApprovedLeaveByEmployee(employeeIds, from, to) {
       endsOn: leaveTo,
       daysInPeriod,
       totalDays: lr.days != null ? Number(lr.days) : daysInPeriod,
+      reason: lr.reason ? String(lr.reason) : null,
     });
   }
   return { leaveByEmployee: map, leaveMetaByEmployee: metaByEmployee };
@@ -915,8 +916,228 @@ async function sendAttendanceReports(period, opts = {}) {
   };
 }
 
+/**
+ * Punch-based late days (not strike snapshots). Sorted by date.
+ * @param {Array<{date: string, isLate?: boolean, checkInTime?: string|null, lateByMinutes?: number}>} empRows
+ */
+function latesFromRows(empRows) {
+  return (empRows || [])
+    .filter((row) => row.isLate)
+    .map((row) => ({
+      date: row.date,
+      checkInTime: row.checkInTime || null,
+      lateByMinutes: Number(row.lateByMinutes) || 0,
+    }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+function mapLeaveItems(items) {
+  return (items || []).map((it) => ({
+    leaveType: it.leaveType || null,
+    fromDate: it.fromDate || null,
+    toDate: it.toDate || null,
+    daysInPeriod: it.daysInPeriod != null ? Number(it.daysInPeriod) : 0,
+    totalDays: it.totalDays != null ? Number(it.totalDays) : it.daysInPeriod || 0,
+    reason: it.reason || null,
+  }));
+}
+
+/**
+ * Payable rules:
+ * - Full-time applied leave is paid (no salary cut).
+ * - Probation: leave and absences are unpaid.
+ * - Full-time absence without a leave request: cover from Casual, then Annual;
+ *   leftover absences are unpaid (salary cut).
+ *
+ * Does not write leave_balances — coverage is for this report's payable math.
+ */
+function computePayable({
+  onProbation,
+  workedDays,
+  leaveDays,
+  absentDays,
+  expectedWorkingDays,
+  monthlySalary,
+  leaveBalances,
+}) {
+  const worked = Number(workedDays) || 0;
+  const leave = Number(leaveDays) || 0;
+  const absents = Number(absentDays) || 0;
+  const expected = Number(expectedWorkingDays) || 0;
+  const annual = Math.max(0, Number((leaveBalances && leaveBalances.annual) || 0));
+  const sick = Math.max(0, Number((leaveBalances && leaveBalances.sick) || 0));
+  const casual = Math.max(0, Number((leaveBalances && leaveBalances.casual) || 0));
+
+  let paidLeaveDays = 0;
+  let coveredFromCasual = 0;
+  let coveredFromAnnual = 0;
+  let unpaidDays = 0;
+  let remainingCasual = casual;
+  let remainingAnnual = annual;
+
+  if (onProbation) {
+    unpaidDays = leave + absents;
+  } else {
+    paidLeaveDays = leave;
+    let remainingAbsences = absents;
+    coveredFromCasual = Math.min(remainingAbsences, remainingCasual);
+    remainingCasual -= coveredFromCasual;
+    remainingAbsences -= coveredFromCasual;
+    coveredFromAnnual = Math.min(remainingAbsences, remainingAnnual);
+    remainingAnnual -= coveredFromAnnual;
+    remainingAbsences -= coveredFromAnnual;
+    unpaidDays = remainingAbsences;
+  }
+
+  const payableDays = worked + paidLeaveDays + coveredFromCasual + coveredFromAnnual;
+  const salary =
+    monthlySalary != null && Number.isFinite(Number(monthlySalary))
+      ? Number(monthlySalary)
+      : null;
+  const payableAmount =
+    salary == null || expected <= 0 ? null : round2((salary * payableDays) / expected);
+
+  return {
+    payableDays,
+    payableAmount,
+    unpaidDays,
+    paidLeaveDays,
+    absenceCoverage: {
+      fromCasual: coveredFromCasual,
+      fromAnnual: coveredFromAnnual,
+    },
+    leaveBalancesAfterCoverage: {
+      annual: remainingAnnual,
+      sick,
+      casual: remainingCasual,
+    },
+  };
+}
+
+/**
+ * Slim JSON month-end card for one employee (on-demand API, no PDF/email).
+ * lateCount/lates come from punch isLate rows, not the monthly strike snapshot.
+ *
+ * @param {object} insight
+ * @param {Array<object>} empRows
+ * @param {{monthlySalary?: number|null}} [opts]
+ */
+function toMonthEndReport(insight, empRows, opts = {}) {
+  const lates = latesFromRows(empRows);
+  const expectedWorkingDays = insight.expectedWorkingDays ?? 0;
+  const workedDays = insight.workedDays ?? 0;
+  const leaveDays = insight.leaveDays ?? 0;
+  const leaveBalances = insight.leaveBalances || { annual: 0, sick: 0, casual: 0 };
+  const rawSalary = opts.monthlySalary;
+  const monthlySalary =
+    rawSalary != null && Number.isFinite(Number(rawSalary)) ? Number(rawSalary) : null;
+  const payable = computePayable({
+    onProbation: Boolean(insight.onProbation),
+    workedDays,
+    leaveDays,
+    absentDays: insight.absentDays ?? 0,
+    expectedWorkingDays,
+    monthlySalary,
+    leaveBalances,
+  });
+
+  return {
+    employeeId: insight.employeeId,
+    employeeName: insight.employeeName || null,
+    teamName: insight.teamName || null,
+    employmentStatus: insight.employmentStatus || 'Full-time',
+    onProbation: Boolean(insight.onProbation),
+    expectedWorkingDays,
+    workedDays,
+    leaveDays,
+    absentDays: insight.absentDays ?? 0,
+    lateCount: lates.length,
+    lates,
+    leaveTaken: insight.leaveTaken || { annual: 0, sick: 0, casual: 0 },
+    leaveItems: mapLeaveItems(insight.leaveItems),
+    leaveBalances,
+    leaveBalancesAfterCoverage: payable.leaveBalancesAfterCoverage,
+    absenceCoverage: payable.absenceCoverage,
+    unpaidDays: payable.unpaidDays,
+    monthlySalary,
+    payableDays: payable.payableDays,
+    payableAmount: payable.payableAmount,
+  };
+}
+
+/**
+ * On-demand month-end reports for one or more employees.
+ * @param {{employeeIds?: string[]|null, from: string, to: string}} opts
+ *   Omit / empty employeeIds → all Active employees.
+ */
+async function getMonthEndReports({ employeeIds, from, to } = {}) {
+  if (!from || !to) {
+    const bounds = monthBoundsPkt();
+    from = from || bounds.from;
+    to = to || bounds.to;
+  }
+
+  const employees =
+    employeeIds && employeeIds.length
+      ? await Employee.selectWhere('id = ANY($1::uuid[])', [employeeIds], 'ORDER BY name ASC')
+      : await Employee.selectWhere("status = 'Active'", [], 'ORDER BY name ASC');
+
+  const teamIds = [
+    ...new Set(employees.flatMap((e) => e.fields.Team || []).filter(Boolean)),
+  ];
+  const teamNameById = await loadTeamNameMap(teamIds);
+  const ids = employees.map((e) => e.id);
+  const { leaveByEmployee, leaveMetaByEmployee } = await loadApprovedLeaveByEmployee(
+    ids,
+    from,
+    to
+  );
+  const rows = await buildRows(employees, from, to, teamNameById, leaveByEmployee);
+  const holidaySet = await Holiday.dateSet(from, to);
+  const shiftById = await loadShiftById(employees);
+  const balanceByEmployee = await loadLeaveBalancesByEmployee(ids);
+  const insights = buildMonthlyInsights(employees, rows, {
+    holidaySet,
+    leaveByEmployee,
+    shiftById,
+    leaveMetaByEmployee,
+    balanceByEmployee,
+    strikeByEmployee: new Map(),
+  });
+
+  const rowsByEmp = new Map();
+  for (const row of rows) {
+    if (!rowsByEmp.has(row.employeeId)) rowsByEmp.set(row.employeeId, []);
+    rowsByEmp.get(row.employeeId).push(row);
+  }
+
+  const salaryById = new Map(
+    employees.map((e) => [
+      e.id,
+      e.fields.MonthlySalary != null ? Number(e.fields.MonthlySalary) : null,
+    ])
+  );
+
+  return {
+    period: {
+      month: String(from).slice(0, 7),
+      from,
+      to,
+    },
+    reports: insights.map((insight) =>
+      toMonthEndReport(insight, rowsByEmp.get(insight.employeeId) || [], {
+        monthlySalary: salaryById.get(insight.employeeId) ?? null,
+      })
+    ),
+  };
+}
+
 module.exports = {
   sendAttendanceReports,
+  getMonthEndReports,
+  toMonthEndReport,
+  computePayable,
+  latesFromRows,
   buildRows,
   displayStatus,
   buildEmployeeMonthlyInsight,
