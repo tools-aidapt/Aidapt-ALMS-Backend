@@ -135,7 +135,7 @@ const create = asyncHandler(async (req, res) => {
   const body = req.body;
 
   // Supabase Auth owns credentials; create the auth user first, then the profile.
-  const userId = await authService.createAuthUser({
+  const { userId } = await authService.createAuthUser({
     email: body.email,
     password: body.password,
     name: body.name,

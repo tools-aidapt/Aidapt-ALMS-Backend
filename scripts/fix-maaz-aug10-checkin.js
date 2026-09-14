@@ -80,9 +80,8 @@ async function main() {
     },
   };
 
-  const checkIn = pktToUtcIso(DATE, 10, 15); // 10:15 AM PKT
-  // Force not late so this day does not count toward strikes.
-  const lateness = { isLate: false, lateByMinutes: 0, isImmediateStrike: false };
+  const checkIn = pktToUtcIso(DATE, 10, 29); // 10:29 AM PKT
+  const lateness = computeLateness(shift, checkIn);
   const worked = computeWorked(checkIn, beforePunch.check_out_time, shiftLengthHours(shift));
 
   // Sanity: what would auto-calc say?
