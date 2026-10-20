@@ -16,6 +16,7 @@ const schemas = {
     fromDate: dateStr,
     toDate: dateStr,
     reason: z.string().optional(),
+    evidenceUrl: z.union([z.string().trim().max(2048), z.null()]).optional(),
   }),
   update: z
     .object({
@@ -23,6 +24,7 @@ const schemas = {
       fromDate: dateStr.optional(),
       toDate: dateStr.optional(),
       reason: z.string().optional(),
+      evidenceUrl: z.union([z.string().trim().max(2048), z.null()]).optional(),
     })
     .refine((obj) => Object.keys(obj).length > 0, {
       message: 'Provide at least one field to update',

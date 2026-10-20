@@ -8,6 +8,7 @@ const {
   shiftWithResolvedGrace,
   shiftLengthHours,
   modeForDistance,
+  statusForCheckIn,
   computeWorked,
   lateStrikeHalfDayDates,
   buildStrikeItems,
@@ -16,6 +17,16 @@ const {
 
 const shift = (fields) => ({ id: 'shf1', fields });
 const employee = (fields) => ({ id: 'emp1', fields });
+
+test('statusForCheckIn: office check-in is present without a remote request', () => {
+  assert.strictEqual(statusForCheckIn('Office', false), 'Present');
+  assert.strictEqual(statusForCheckIn('Office', true), 'Present');
+});
+
+test('statusForCheckIn: remote check-in is absent until approved', () => {
+  assert.strictEqual(statusForCheckIn('Remote In', false), 'Absent');
+  assert.strictEqual(statusForCheckIn('Remote In', true), 'Present');
+});
 
 test('computeLateness: on-time within grace is not late', () => {
   const s = shift({ StartTime: '10:00', GraceMinutes: 15 });

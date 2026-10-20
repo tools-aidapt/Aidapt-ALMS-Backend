@@ -69,6 +69,17 @@ function sendMail({ to, subject, html, text }) {
 }
 
 /**
+ * Approval emails open the prescription with the same single-use stage token
+ * as the approve/reject links. The stored evidence URL itself stays token-free.
+ */
+function evidenceViewUrl(url, token) {
+  if (!url) return null;
+  if (!token) return url;
+  const join = String(url).includes('?') ? '&' : '?';
+  return `${url}${join}token=${encodeURIComponent(token)}`;
+}
+
+/**
  * Approval request with single-use approve/reject links.
  * stage 'manager' goes to the employee's manager; stage 'final' goes to Hitesh
  * after the manager has approved.
@@ -93,6 +104,7 @@ function sendLeaveApprovalRequest({
 
   const approveUrl = link('approve');
   const rejectUrl = link('reject');
+  const evidenceUrl = evidenceViewUrl(request.fields.EvidenceUrl, token);
   const leaveType = request.fields.LeaveType;
   const subject = isFinal
     ? `Final approval needed: ${employeeName}'s ${leaveType} leave`
@@ -110,6 +122,11 @@ function sendLeaveApprovalRequest({
       <li>To: ${request.fields.ToDate}</li>
       <li>Days: ${request.fields.Days}</li>
       <li>Reason: ${escapeHtml(request.fields.Reason || '—')}</li>
+      ${
+        evidenceUrl
+          ? `<li>Doctor's prescription: <a href="${escapeHtml(evidenceUrl)}">View evidence</a></li>`
+          : ''
+      }
     </ul>
     <p>
       <a href="${approveUrl}">Approve</a> &nbsp;|&nbsp;
@@ -142,6 +159,7 @@ function sendLeaveApprovalRequest({
       toDate: request.fields.ToDate,
       days: request.fields.Days,
       reason: request.fields.Reason || '',
+      evidenceUrl,
       approveUrl,
       rejectUrl,
     },

@@ -53,6 +53,13 @@ function hasBody(obj) {
   return obj && typeof obj === 'object' && Object.keys(obj).length > 0;
 }
 
+/** Finance payloads include amounts, comments, and attachment URLs. */
+function isFinanceResponse(url) {
+  if (typeof url !== 'string') return false;
+  const path = url.split('?')[0];
+  return path === '/api/finance' || path.startsWith('/api/finance/') || path === '/api/jobs/sync-finance';
+}
+
 function requestLogger(req, res, next) {
   const start = Date.now();
   const id = crypto.randomUUID().slice(0, 8);
@@ -89,7 +96,7 @@ function requestLogger(req, res, next) {
         url: req.originalUrl,
         status: res.statusCode,
         durationMs: Date.now() - start,
-        body: forLog(res.locals.__responseBody),
+        body: isFinanceResponse(req.originalUrl) ? '[REDACTED]' : forLog(res.locals.__responseBody),
       })
     );
   });

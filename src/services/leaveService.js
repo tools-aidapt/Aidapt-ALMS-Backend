@@ -9,6 +9,12 @@ const env = require('../config/env');
 const holidayService = require('./holidayService');
 const emailService = require('./emailService');
 const { generateDecisionToken, safeEquals } = require('../utils/tokenGenerator');
+const uploadService = require('./uploadService');
+const {
+  needsEvidence,
+  uploadIdFromUrl,
+  resolveSickLeaveEvidence,
+} = require('../utils/sickLeaveEvidence');
 const { nowUtcIso, dateRangeInclusive, dowForDateStr } = require('../utils/dateUtils');
 const {
   AppError,
@@ -49,6 +55,8 @@ function serialize(rec) {
     managerApprovedBy: f.ManagerApprovedBy || [],
     decidedAt: f.DecidedAt || null,
     decidedBy: f.DecidedBy || [],
+    evidenceUrl: f.EvidenceUrl || null,
+    evidenceRequired: needsEvidence(f.LeaveType, f.Days),
     // DecisionToken deliberately omitted from API output.
   };
 }
@@ -200,11 +208,31 @@ async function emailStageApproverSafe(args) {
 }
 
 /**
+ * Turn an optional evidenceUrl into the canonical stored URL.
+ * On edit, omit evidenceUrl to keep the file already on the request.
+ * Pass null or '' to remove it (rejected when the sick-leave rule still applies).
+ */
+async function loadEvidenceUrl(employeeId, { leaveType, days, evidenceUrl, existingUrl }) {
+  const chosen = evidenceUrl === undefined ? existingUrl : evidenceUrl;
+  const id = uploadIdFromUrl(chosen);
+  const upload = id ? await uploadService.getById(id) : null;
+  return resolveSickLeaveEvidence({
+    leaveType,
+    days,
+    evidenceUrl: chosen,
+    upload,
+    employeeId,
+    appBaseUrl: env.appBaseUrl,
+  });
+}
+
+/**
  * Submit a leave request. Computes Days, stores a single-use decision token,
  * and emails only the employee's manager. Hitesh is emailed after that
- * manager approves.
+ * manager approves. Sick leave of 2 or more working days must include a
+ * doctor's prescription (evidenceUrl).
  */
-async function submit(employeeId, { leaveType, fromDate, toDate, reason }) {
+async function submit(employeeId, { leaveType, fromDate, toDate, reason, evidenceUrl }) {
   if (!LEAVE_TYPES.includes(leaveType)) {
     throw badRequest(`leaveType must be one of ${LEAVE_TYPES.join(', ')}`);
   }
@@ -225,6 +253,7 @@ async function submit(employeeId, { leaveType, fromDate, toDate, reason }) {
   }
 
   const finalApprover = await resolveFinalApprover();
+  const evidence = await loadEvidenceUrl(employeeId, { leaveType, days, evidenceUrl });
   const token = generateDecisionToken();
   const rec = await LeaveRequest.create({
     Employee: [employeeId],
@@ -233,6 +262,7 @@ async function submit(employeeId, { leaveType, fromDate, toDate, reason }) {
     ToDate: toDate,
     Days: days,
     Reason: reason || '',
+    EvidenceUrl: evidence,
     Status: STATUS.PENDING,
     Manager: [managerId],
     FinalApprover: [finalApprover.id],
@@ -536,6 +566,12 @@ async function updateRequest(requestId, employeeId, patch) {
     );
   }
   const finalApprover = await resolveFinalApprover();
+  const evidence = await loadEvidenceUrl(employeeId, {
+    leaveType,
+    days,
+    evidenceUrl: patch.evidenceUrl,
+    existingUrl: request.fields.EvidenceUrl,
+  });
   const token = generateDecisionToken();
   await LeaveRequest.update(requestId, {
     LeaveType: leaveType,
@@ -543,6 +579,7 @@ async function updateRequest(requestId, employeeId, patch) {
     ToDate: toDate,
     Days: days,
     Reason: reason,
+    EvidenceUrl: evidence,
     Status: STATUS.PENDING,
     Manager: [managerId],
     FinalApprover: [finalApprover.id],

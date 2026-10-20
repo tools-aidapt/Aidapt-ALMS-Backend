@@ -28,4 +28,6 @@ router.post(
   ctrl.attendanceReminders
 );
 
+router.post('/sync-finance', requireJobSecret, ctrl.syncFinance);
+
 module.exports = router;

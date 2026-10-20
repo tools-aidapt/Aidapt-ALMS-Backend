@@ -5,6 +5,7 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const absentMarker = require('../jobs/absentMarker');
 const attendanceReports = require('../jobs/attendanceReports');
 const attendanceReminders = require('../jobs/attendanceReminders');
+const financeService = require('../services/financeService');
 
 const schemas = {
   markAbsent: z.object({
@@ -51,9 +52,14 @@ const attendanceRemindersRun = asyncHandler(async (req, res) => {
   res.json({ data: result });
 });
 
+const syncFinance = asyncHandler(async (req, res) => {
+  res.json({ data: await financeService.sync() });
+});
+
 module.exports = {
   markAbsent,
   attendanceReport,
   attendanceReminders: attendanceRemindersRun,
+  syncFinance,
   schemas,
 };

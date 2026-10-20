@@ -132,6 +132,36 @@ describe('buildEmployeeMonthlyInsight', () => {
     assert.equal(insight.expectedWorkingDays, 2);
   });
 
+  test('unapproved remote check-in counts as absent, not a worked remote day', () => {
+    const empRows = [
+      row({
+        date: '2026-07-01',
+        status: 'Absent',
+        mode: 'Remote',
+        workedMinutes: 480,
+        checkInTime: '10:05',
+        checkOutTime: '18:05',
+        isLate: true,
+        lateByMinutes: 5,
+      }),
+      row({ date: '2026-07-02', status: 'Present', mode: 'Office', workedMinutes: 540 }),
+    ];
+
+    const insight = buildEmployeeMonthlyInsight(EMP, empRows, {
+      holidaySet: new Set(),
+      leaveSet: new Set(),
+      shift: shift9to18,
+    });
+
+    assert.equal(insight.absentDays, 1);
+    assert.equal(insight.remoteDays, 0);
+    assert.equal(insight.presentDays, 1);
+    assert.equal(insight.workedDays, 1);
+    assert.equal(insight.workedMinutes, 540);
+    assert.equal(insight.lateDays, 0);
+    assert.equal(insight.onsiteDays, 1);
+  });
+
   test('two people with different leave still share same expected days', () => {
     const baseRows = [
       row({ date: '2026-07-01', status: 'Present', mode: 'Office', workedMinutes: 540 }),

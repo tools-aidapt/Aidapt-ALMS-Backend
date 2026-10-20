@@ -136,7 +136,8 @@ create table if not exists leave_requests (
   manager_approved_by uuid references employees (id) on delete set null,
   decided_at     timestamptz,
   decided_by     uuid references employees (id) on delete set null,
-  decision_token text
+  decision_token text,
+  evidence_url   text
 );
 create index if not exists leave_employee_idx on leave_requests (employee_id);
 create index if not exists leave_token_idx on leave_requests (decision_token);
@@ -328,7 +329,7 @@ create table if not exists employee_uploads (
   id           uuid primary key default gen_random_uuid(),
   employee_id  uuid not null references employees (id) on delete cascade,
   purpose      text not null
-                 check (purpose in ('photo', 'cnic_front', 'cnic_back')),
+                 check (purpose in ('photo', 'cnic_front', 'cnic_back', 'sick_leave_evidence')),
   content_type text not null,
   byte_size    integer not null check (byte_size > 0 and byte_size <= 8388608),
   data         bytea not null,

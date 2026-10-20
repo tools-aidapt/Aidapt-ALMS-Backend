@@ -483,8 +483,9 @@ async function loadShiftById(employees) {
  * company Mon–Fri days in range − public holidays (leave does NOT reduce expected).
  * Leave taken is reported separately with remaining balances.
  *
- * Worked days = onsite + remote days (both count as working days), plus
+ * Worked days = onsite + approved remote days (both count as working days), plus
  * still-checked-in / present without a mode / Half Day.
+ * A remote check-in without manager approval is status Absent and does not count.
  */
 function buildEmployeeMonthlyInsight(employee, empRows, opts) {
   const {
@@ -531,19 +532,22 @@ function buildEmployeeMonthlyInsight(employee, empRows, opts) {
   const workedDayDates = new Set();
 
   for (const row of empRows) {
-    if (row.workedMinutes != null) workedMinutes += Number(row.workedMinutes) || 0;
-    if (row.overtimeHours != null) overtimeHours += Number(row.overtimeHours) || 0;
-    if (row.isLate) {
+    const status = row.status || '';
+    // Unapproved remote check-ins are Absent: keep the row for the record,
+    // but do not let hours, lateness, or remote mode count as worked time.
+    const countsAsWork = status !== 'Absent';
+    if (countsAsWork && row.workedMinutes != null) workedMinutes += Number(row.workedMinutes) || 0;
+    if (countsAsWork && row.overtimeHours != null) overtimeHours += Number(row.overtimeHours) || 0;
+    if (countsAsWork && row.isLate) {
       lateDays += 1;
       lateMinutes += Number(row.lateByMinutes) || 0;
     }
-    if (row.mode === 'Office') onsiteDays += 1;
-    else if (row.mode === 'Remote') remoteDays += 1;
+    if (countsAsWork && row.mode === 'Office') onsiteDays += 1;
+    else if (countsAsWork && row.mode === 'Remote') remoteDays += 1;
 
-    if (row.checkInTime) checkInTimes.push(row.checkInTime);
-    if (row.checkOutTime) checkOutTimes.push(row.checkOutTime);
+    if (countsAsWork && row.checkInTime) checkInTimes.push(row.checkInTime);
+    if (countsAsWork && row.checkOutTime) checkOutTimes.push(row.checkOutTime);
 
-    const status = row.status || '';
     switch (status) {
       case 'Present':
         presentDays += 1;
@@ -573,8 +577,9 @@ function buildEmployeeMonthlyInsight(employee, empRows, opts) {
         break;
     }
 
-    // Office + Remote always count as a working day (even if status is unusual).
-    if (row.mode === 'Office' || row.mode === 'Remote') {
+    // Approved office and remote days count as worked. Absent does not,
+    // including a remote check-in that was never approved.
+    if (countsAsWork && (row.mode === 'Office' || row.mode === 'Remote')) {
       if (status !== 'On Leave' && status !== 'Holiday') {
         workedDayDates.add(row.date);
       }

@@ -1,0 +1,519 @@
+{
+  "name": "AIMS — Leave, regularization, and remote work email",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3995614c53330b8235732b6439f4722022fa77b84f9cd17e44c49abe50c94c1f"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "81b196ac-a71f-4999-8531-492e71488397",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        160,
+        128
+      ],
+      "id": "9b0d24d1-6201-4620-87c4-6ef811996105",
+      "name": "Webhook1",
+      "webhookId": "81b196ac-a71f-4999-8531-492e71488397"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "Leave approval",
+              "renameOutput": true,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "2e8d79d1-ea41-4ce5-b36c-564a7928e260",
+                    "leftValue": "={{ $json.body.event }}",
+                    "rightValue": "leave.approval_request",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Regularization",
+              "renameOutput": true,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "8c974ad3-9da8-4ed8-8681-ce7ca2f933a3",
+                    "leftValue": "={{ $json.body.event }}",
+                    "rightValue": "regularization.approval_request",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Leave decision",
+              "renameOutput": true,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "5b2a5070-e998-4ae5-997a-2fe3de75bd44",
+                    "leftValue": "={{ $json.body.event }}",
+                    "rightValue": "leave.decision",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Remote work approval",
+              "renameOutput": true,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "b3f83e15-7595-418a-9b5f-42717d92ae24",
+                    "leftValue": "={{ $json.body.event }}",
+                    "rightValue": "remote_work.approval_request",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Remote work decision",
+              "renameOutput": true,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "47b88de4-6ec5-44ed-8b0b-fcbd452c3ede",
+                    "leftValue": "={{ $json.body.event }}",
+                    "rightValue": "remote_work.decision",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Ignored"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        384,
+        128
+      ],
+      "id": "8499c468-fdd1-43b7-982c-c129c6c78ea5",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Aidapt ALMS · Build Leave Approval-Request Email Payload ──────────\n// n8n Code node · Mode: \"Run Once for Each Item\"\n// Event: leave.approval_request.\n//   stage \"manager\" → the employee's manager, with Approve and Reject in the email.\n//   stage \"final\"   → Hitesh, with the same buttons, only after the manager approves.\n// The buttons use the backend decision links, so the choice is recorded from the email.\n\nconst body = $json.body ?? $json;\nconst src  = body.data ?? $json.data ?? $json;\n\nconst esc = (v) => String(v ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\n\nconst stage        = src.stage === 'final' ? 'final' : 'manager';\nconst isFinal      = stage === 'final';\nconst employeeName = esc(src.employeeName || 'An employee');\nconst leaveType    = esc(src.leaveType || 'Leave');\nconst managerName  = esc(src.managerName || 'their manager');\nconst finalName    = esc(src.finalApproverName || 'the final approver');\nconst days         = Number(src.days) || 0;\nconst daysLabel    = `${days} ${days === 1 ? 'day' : 'days'}`;\n\nconst evidenceRaw = typeof src.evidenceUrl === 'string' ? src.evidenceUrl.trim() : '';\nconst evidenceRow = evidenceRaw\n  ? '<tr>'\n    + '<td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;vertical-align:top;\">Prescription</td>'\n    + '<td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">'\n    + '<a href=\"' + esc(evidenceRaw) + '\" style=\"color:#11A8A0;text-decoration:underline;\">View doctor\\'s prescription</a>'\n    + '</td></tr>'\n  : '';\n\nconst payload = {\n  requestId:  esc(src.requestId),\n  stage,\n  employeeName,\n  leaveType,\n  fromDate:   esc(src.fromDate),\n  toDate:     esc(src.toDate),\n  days,\n  daysLabel,\n  reason:     esc(src.reason) || 'No reason given',\n  evidenceUrl: evidenceRaw,\n  evidenceRow,\n  approveUrl: typeof src.approveUrl === 'string' ? src.approveUrl : '',\n  rejectUrl:  typeof src.rejectUrl === 'string' ? src.rejectUrl : '',\n  eyebrow:  isFinal ? 'Final approval needed' : 'A request is waiting on your approval',\n  headline: isFinal\n    ? `${employeeName}'s ${leaveType} leave needs your final approval`\n    : `${employeeName} requested ${leaveType} leave`,\n  stepNote: isFinal\n    ? `Approved by ${managerName}. Approving deducts ${daysLabel} from their ${leaveType} leave.`\n    : `If you approve, it goes to ${finalName} for final approval. Their balance does not change yet.`,\n  approveLabel: isFinal ? 'Give final approval' : 'Approve',\n  tag:          isFinal ? 'Final Approval' : 'Leave Request',\n};\n\npayload.to      = body.to ?? src.approverEmail ?? '';\npayload.subject = body.subject ?? (isFinal\n  ? `Final approval needed: ${src.employeeName}'s ${src.leaveType} leave`\n  : `Leave request from ${src.employeeName} (${src.leaveType})`);\n\nif (!payload.to) {\n  throw new Error(`leave.approval_request ${src.requestId}: missing recipient`);\n}\nif (!payload.approveUrl || !payload.rejectUrl) {\n  throw new Error(`leave.approval_request ${src.requestId}: approve/reject URL missing`);\n}\n\nreturn { json: payload };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        -80
+      ],
+      "id": "5c258b25-136f-4d7c-9865-b0cc872e7bfd",
+      "name": "Build Leave Approval"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "=<!DOCTYPE html>\n<html lang=\"en\" xmlns=\"http://www.w3.org/1999/xhtml\">\n<head>\n  <meta charset=\"utf-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <meta name=\"x-apple-disable-message-reformatting\" />\n  <title>Leave Request</title>\n  <!--[if mso]>\n  <style>table,td,div,p,a{font-family:Arial,Helvetica,sans-serif !important;}</style>\n  <![endif]-->\n</head>\n<body style=\"margin:0;padding:0;background-color:#e2e1e1;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;\">\n\n  <div style=\"display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#e2e1e1;\">\n    {{ $json.headline }}. Approve or reject it from this email.\n  </div>\n\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#e2e1e1;\">\n    <tr>\n      <td align=\"center\" style=\"padding:32px 16px;\">\n\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(46,31,31,0.08);\">\n\n          <tr>\n            <td style=\"background-color:#ffffff;padding:24px 32px;border-bottom:3px solid #11A8A0;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td style=\"vertical-align:middle;\">\n                    <img src=\"https://res.cloudinary.com/oyahmod8/image/upload/v1784128036/Primary_Logo_3_k9wtyj.png\"\n                         alt=\"Aidapt\" width=\"120\" height=\"auto\"\n                         style=\"display:block;border:0;outline:none;text-decoration:none;max-width:120px;height:auto;\" />\n                  </td>\n                  <td align=\"right\" style=\"vertical-align:middle;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#11A8A0;\">\n                    {{ $json.tag }}\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:32px 32px 8px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0 0 6px 0;font-size:13px;color:#785d5c;\">{{ $json.eyebrow }}</p>\n              <h1 style=\"margin:0;font-size:22px;line-height:1.3;font-weight:700;color:#2e1f1f;\">\n                {{ $json.headline }}\n              </h1>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:20px 32px 8px 32px;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border:1px solid #e2e1e1;border-radius:10px;\">\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;width:38%;\">Leave type</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.leaveType }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">From</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.fromDate }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">To</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.toDate }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">Days</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.days }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;vertical-align:top;\">Reason</td>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.reason }}</td>\n                </tr>\n                {{ $json.evidenceRow }}\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:16px 32px 0 32px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#2e1f1f;\">\n              {{ $json.stepNote }}\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:20px 32px 8px 32px;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td width=\"50%\" style=\"padding-right:6px;\">\n                    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                      <tr>\n                        <td align=\"center\" bgcolor=\"#11A8A0\" style=\"border-radius:8px;background-color:#11A8A0;\">\n                          <a href=\"{{ $json.approveUrl }}\" target=\"_blank\"\n                             style=\"display:block;padding:14px 12px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#2e1f1f;text-decoration:none;border-radius:8px;\">\n                            {{ $json.approveLabel }}\n                          </a>\n                        </td>\n                      </tr>\n                    </table>\n                  </td>\n                  <td width=\"50%\" style=\"padding-left:6px;\">\n                    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                      <tr>\n                        <td align=\"center\" bgcolor=\"#ffffff\" style=\"border-radius:8px;background-color:#ffffff;border:2px solid #2e1f1f;\">\n                          <a href=\"{{ $json.rejectUrl }}\" target=\"_blank\"\n                             style=\"display:block;padding:12px 12px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#2e1f1f;text-decoration:none;border-radius:8px;\">\n                            Reject\n                          </a>\n                        </td>\n                      </tr>\n                    </table>\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:12px 32px 28px 32px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#785d5c;text-align:center;\">\n              Use Approve or Reject in this email. Each link works once.<br />\n              Prefer the portal? <a href=\"https://alms.aidaptnow.com/approvals\" target=\"_blank\" style=\"color:#2e1f1f;font-weight:700;text-decoration:underline;\">Review it in Approvals</a>.\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"background-color:#11A8A0;padding:20px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0;font-size:12px;color:#ffffff;\">Aidapt | Your AI Transformation Partner</p>\n              <p style=\"margin:4px 0 0 0;font-size:11px;color:#ffffff;\">This notification was sent automatically. Request ID: {{ $json.requestId }}</p>\n            </td>\n          </tr>\n\n        </table>\n\n      </td>\n    </tr>\n  </table>\n\n</body>\n</html>\n",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        900,
+        -80
+      ],
+      "id": "02b05cc5-794a-4c59-a6bf-0301eaa2b7bc",
+      "name": "Send leave approval",
+      "webhookId": "99c1a584-5b0b-4688-838a-2579e708dcbe",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "m9WTLZOWpRKaVwEa",
+          "name": "Sofi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Aidapt ALMS · Build Regularization-Request Email Payload ──────────\n// n8n Code node · Mode: \"Run Once for Each Item\"\n\nconst PROD_BASE = 'https://aidapt-alms-backend.onrender.com';\nconst DEV_BASE  = 'http://localhost:4000';\n\nconst body = $json.body ?? $json;\nconst src  = body.data ?? $json.data ?? $json;\n\nconst fixUrl = (url) =>\n  typeof url === 'string' ? url.replace(DEV_BASE, PROD_BASE) : '';\n\nconst payload = {\n  requestId:            src.requestId            ?? '',\n  employeeName:         src.employeeName          ?? 'Unknown',\n  employeeEmail:        src.employeeEmail         ?? '',\n  managerEmail:         src.managerEmail          ?? '',\n  date:                 src.date                  ?? '',\n  requestedCheckInPkt:  src.requestedCheckInPkt   ?? '—',\n  requestedCheckOutPkt: src.requestedCheckOutPkt  ?? '—',\n  reason:               src.reason                ?? '—',\n  reviewUrl:            fixUrl(src.reviewUrl),\n};\n\npayload.subject = body.subject\n  ?? `Regularization request from ${payload.employeeName} (${payload.date})`;\npayload.to      = body.to ?? payload.managerEmail;\n\nreturn { json: payload };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        160
+      ],
+      "id": "79af26df-3a32-4956-b808-e695efe581ff",
+      "name": "Build Regularization"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "=<!DOCTYPE html>\n<html lang=\"en\" xmlns=\"http://www.w3.org/1999/xhtml\">\n<head>\n  <meta charset=\"utf-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <meta name=\"x-apple-disable-message-reformatting\" />\n  <title>Regularization Request</title>\n  <!--[if mso]>\n  <style>table,td,div,p,a{font-family:Arial,Helvetica,sans-serif !important;}</style>\n  <![endif]-->\n</head>\n<body style=\"margin:0;padding:0;background-color:#e2e1e1;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;\">\n\n  <div style=\"display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#e2e1e1;\">\n    {{ $json.employeeName }} requested an attendance regularization for {{ $json.date }}.\n  </div>\n\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#e2e1e1;\">\n    <tr>\n      <td align=\"center\" style=\"padding:32px 16px;\">\n\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(46,31,31,0.08);\">\n\n          <tr>\n            <td style=\"background-color:#ffffff;padding:24px 32px;border-bottom:3px solid #11A8A0;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td style=\"vertical-align:middle;\">\n                    <img src=\"https://res.cloudinary.com/oyahmod8/image/upload/v1784128036/Primary_Logo_3_k9wtyj.png\"\n                         alt=\"Aidapt\" width=\"120\" height=\"auto\"\n                         style=\"display:block;border:0;outline:none;text-decoration:none;max-width:120px;height:auto;\" />\n                  </td>\n                  <td align=\"right\" style=\"vertical-align:middle;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#11A8A0;\">\n                    Regularization Request\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:32px 32px 8px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0 0 6px 0;font-size:13px;color:#785d5c;\">A new request needs your review</p>\n              <h1 style=\"margin:0;font-size:22px;line-height:1.3;font-weight:700;color:#2e1f1f;\">\n                {{ $json.employeeName }} requested an attendance regularization\n              </h1>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:20px 32px 8px 32px;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border:1px solid #e2e1e1;border-radius:10px;\">\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;width:42%;\">Date</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.date }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">Requested check-in (PKT)</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.requestedCheckInPkt }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">Requested check-out (PKT)</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.requestedCheckOutPkt }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;vertical-align:top;\">Reason</td>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.reason }}</td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:24px 32px 8px 32px;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td align=\"center\" style=\"border-radius:8px;background-color:#11A8A0;\">\n                    <a href=\"https://alms.aidaptnow.com/regularize\"\n                       style=\"display:block;padding:14px 20px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;\">\n                      Review request\n                    </a>\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:12px 32px 28px 32px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#785d5c;text-align:center;\">\n              You'll be asked to log in to approve or reject this request.\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"background-color:#11A8A0;padding:20px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0;font-size:12px;color:#ffffff;\">Aidapt | Your AI Transformation Partner</p>\n              <p style=\"margin:4px 0 0 0;font-size:11px;color:#ffffff;\">This notification was sent automatically. Request ID: {{ $json.requestId }}</p>\n            </td>\n          </tr>\n\n        </table>\n\n      </td>\n    </tr>\n  </table>\n\n</body>\n</html>\n",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        900,
+        80
+      ],
+      "id": "00f24dce-318c-4e0d-bb81-a72e96cf22f0",
+      "name": "Send regularization to manager",
+      "webhookId": "99c1a584-5b0b-4688-838a-2579e708dcbe",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "m9WTLZOWpRKaVwEa",
+          "name": "Sofi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toRecipients": "hitesh@aidapt.co",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "=<!DOCTYPE html>\n<html lang=\"en\" xmlns=\"http://www.w3.org/1999/xhtml\">\n<head>\n  <meta charset=\"utf-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <meta name=\"x-apple-disable-message-reformatting\" />\n  <title>Regularization Request</title>\n  <!--[if mso]>\n  <style>table,td,div,p,a{font-family:Arial,Helvetica,sans-serif !important;}</style>\n  <![endif]-->\n</head>\n<body style=\"margin:0;padding:0;background-color:#e2e1e1;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;\">\n\n  <div style=\"display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#e2e1e1;\">\n    {{ $json.employeeName }} requested an attendance regularization for {{ $json.date }}.\n  </div>\n\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#e2e1e1;\">\n    <tr>\n      <td align=\"center\" style=\"padding:32px 16px;\">\n\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(46,31,31,0.08);\">\n\n          <tr>\n            <td style=\"background-color:#ffffff;padding:24px 32px;border-bottom:3px solid #11A8A0;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td style=\"vertical-align:middle;\">\n                    <img src=\"https://res.cloudinary.com/oyahmod8/image/upload/v1784128036/Primary_Logo_3_k9wtyj.png\"\n                         alt=\"Aidapt\" width=\"120\" height=\"auto\"\n                         style=\"display:block;border:0;outline:none;text-decoration:none;max-width:120px;height:auto;\" />\n                  </td>\n                  <td align=\"right\" style=\"vertical-align:middle;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#11A8A0;\">\n                    Regularization Request\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:32px 32px 8px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0 0 6px 0;font-size:13px;color:#785d5c;\">A new request needs your review</p>\n              <h1 style=\"margin:0;font-size:22px;line-height:1.3;font-weight:700;color:#2e1f1f;\">\n                {{ $json.employeeName }} requested an attendance regularization\n              </h1>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:20px 32px 8px 32px;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border:1px solid #e2e1e1;border-radius:10px;\">\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;width:42%;\">Date</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.date }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">Requested check-in (PKT)</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.requestedCheckInPkt }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">Requested check-out (PKT)</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.requestedCheckOutPkt }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;vertical-align:top;\">Reason</td>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.reason }}</td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:24px 32px 8px 32px;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td align=\"center\" style=\"border-radius:8px;background-color:#11A8A0;\">\n                    <a href=\"https://alms.aidaptnow.com/regularize\"\n                       style=\"display:block;padding:14px 20px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;\">\n                      Review request\n                    </a>\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:12px 32px 28px 32px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#785d5c;text-align:center;\">\n              You'll be asked to log in to approve or reject this request.\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"background-color:#11A8A0;padding:20px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0;font-size:12px;color:#ffffff;\">Aidapt | Your AI Transformation Partner</p>\n              <p style=\"margin:4px 0 0 0;font-size:11px;color:#ffffff;\">This notification was sent automatically. Request ID: {{ $json.requestId }}</p>\n            </td>\n          </tr>\n\n        </table>\n\n      </td>\n    </tr>\n  </table>\n\n</body>\n</html>\n",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        900,
+        260
+      ],
+      "id": "9b6e25e5-9240-48d1-a575-e872938529f5",
+      "name": "Send regularization copy to Hitesh",
+      "webhookId": "99c1a584-5b0b-4688-838a-2579e708dcbe",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "m9WTLZOWpRKaVwEa",
+          "name": "Sofi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Aidapt ALMS · Build Leave-Decision Email Payload ──────────────────\n// n8n Code node · Mode: \"Run Once for Each Item\"\n// Event: leave.decision. Goes to the employee who applied, not to Hitesh.\n// stage \"manager\" = the manager rejected it. stage \"final\" = rejected or\n// approved at final approval.\n\nconst body = $json.body ?? $json;\nconst src  = body.data ?? $json.data ?? $json;\n\nconst esc = (v) => String(v ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\n\nconst decision   = src.decision ?? 'Updated';\nconst isApproved = decision.toLowerCase() === 'approved';\nconst stage      = src.stage ?? null;\n\nconst statusColor = isApproved ? '#11A8A0' : '#d33c1f';\n\nconst leaveType = esc(src.leaveType ?? 'Leave');\nconst fromDate  = esc(src.fromDate);\nconst toDate    = esc(src.toDate);\nconst dateRange = fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`;\nconst days      = Number(src.days) || 0;\nconst daysLabel = `${days} ${days === 1 ? 'day' : 'days'}`;\n\nconst outcome = isApproved\n  ? 'approved'\n  : stage === 'manager'\n    ? 'rejected by your manager'\n    : stage === 'final'\n      ? 'rejected at final approval'\n      : decision.toLowerCase();\n\nconst payload = {\n  requestId:     esc(src.requestId),\n  employeeName:  esc(src.employeeName ?? 'there'),\n  employeeEmail: src.employeeEmail ?? '',\n  leaveType,\n  fromDate,\n  toDate,\n  dateRange,\n  days,\n  daysLabel,\n  decision:      esc(decision),\n  statusColor,\n  headline:      `Your ${leaveType} leave was ${outcome}`,\n};\n\npayload.subject = body.subject ?? `Your leave request was ${decision.toLowerCase()}`;\npayload.to      = body.to ?? payload.employeeEmail;\n\nif (!payload.to) {\n  throw new Error(`leave.decision ${src.requestId}: missing employee email`);\n}\n\nreturn { json: payload };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        440
+      ],
+      "id": "d0b81d99-74ac-40bd-9220-e9641eacb66a",
+      "name": "Build Leave Decision"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "=<!DOCTYPE html>\n<html lang=\"en\" xmlns=\"http://www.w3.org/1999/xhtml\">\n<head>\n  <meta charset=\"utf-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <meta name=\"x-apple-disable-message-reformatting\" />\n  <title>Leave Decision</title>\n  <!--[if mso]>\n  <style>table,td,div,p,a{font-family:Arial,Helvetica,sans-serif !important;}</style>\n  <![endif]-->\n</head>\n<body style=\"margin:0;padding:0;background-color:#e2e1e1;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;\">\n\n  <div style=\"display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#e2e1e1;\">\n    Your {{ $json.leaveType }} leave ({{ $json.dateRange }}) was {{ $json.decision }}.\n  </div>\n\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#e2e1e1;\">\n    <tr>\n      <td align=\"center\" style=\"padding:32px 16px;\">\n\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(46,31,31,0.08);\">\n\n          <tr>\n            <td style=\"background-color:#ffffff;padding:24px 32px;border-bottom:3px solid {{ $json.statusColor }};\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td style=\"vertical-align:middle;\">\n                    <img src=\"https://res.cloudinary.com/oyahmod8/image/upload/v1784128036/Primary_Logo_3_k9wtyj.png\"\n                         alt=\"Aidapt\" width=\"120\" height=\"auto\"\n                         style=\"display:block;border:0;outline:none;text-decoration:none;max-width:120px;height:auto;\" />\n                  </td>\n                  <td align=\"right\" style=\"vertical-align:middle;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:{{ $json.statusColor }};\">\n                    Leave Decision\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:32px 32px 8px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0 0 12px 0;font-size:14px;color:#2e1f1f;\">Hi {{ $json.employeeName }},</p>\n\n              <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 14px 0;\">\n                <tr>\n                  <td style=\"background-color:{{ $json.statusColor }};border-radius:999px;padding:6px 16px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#ffffff;\">\n                    {{ $json.decision }}\n                  </td>\n                </tr>\n              </table>\n\n              <h1 style=\"margin:0;font-size:22px;line-height:1.3;font-weight:700;color:#2e1f1f;\">\n                {{ $json.headline }}\n              </h1>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:20px 32px 8px 32px;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border:1px solid #e2e1e1;border-radius:10px;\">\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;width:38%;\">Leave type</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.leaveType }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">Dates</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.dateRange }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">Duration</td>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.daysLabel }}</td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:20px 32px 28px 32px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#785d5c;\">\n              If anything looks off, reach out to your manager or reply to this email.\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"background-color:#11A8A0;padding:20px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0;font-size:12px;color:#ffffff;\">Aidapt | Your AI Transformation Partner</p>\n              <p style=\"margin:4px 0 0 0;font-size:11px;color:#ffffff;\">This notification was sent automatically. Request ID: {{ $json.requestId }}</p>\n            </td>\n          </tr>\n\n        </table>\n\n      </td>\n    </tr>\n  </table>\n\n</body>\n</html>\n",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        900,
+        440
+      ],
+      "id": "27ce3926-d0bd-4507-87f2-d39fa072c676",
+      "name": "Send decision to employee",
+      "webhookId": "99c1a584-5b0b-4688-838a-2579e708dcbe",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "m9WTLZOWpRKaVwEa",
+          "name": "Sofi"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        640,
+        1240
+      ],
+      "id": "b7e1c4a2-6f08-4d3a-9c55-1a2b3c4d5e6f",
+      "name": "Ignore retired events"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Aidapt ALMS · Build Remote Work Approval Email\n// Event: remote_work.approval_request. Sent to the employee's manager.\n// Approve and Reject use the backend decision links and work once.\n\nconst PROD_BASE = 'https://aidapt-alms-backend.onrender.com';\nconst DEV_BASE = 'http://localhost:4000';\n\nconst body = $json.body ?? $json;\nconst src = body.data ?? $json.data ?? $json;\n\nconst esc = (v) => String(v ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\n\nconst fixUrl = (url) =>\n  typeof url === 'string' ? url.replace(DEV_BASE, PROD_BASE) : '';\n\nconst employeeName = esc(src.employeeName || 'An employee');\nconst days = Number(src.days) || 0;\nconst daysLabel = days + ' ' + (days === 1 ? 'day' : 'days');\n\nconst payload = {\n  requestId: esc(src.requestId),\n  employeeName,\n  fromDate: esc(src.fromDate),\n  toDate: esc(src.toDate),\n  days,\n  daysLabel,\n  reason: esc(src.reason) || 'No reason given',\n  approveUrl: fixUrl(src.approveUrl),\n  rejectUrl: fixUrl(src.rejectUrl),\n  eyebrow: 'A request is waiting on your approval',\n  headline: employeeName + ' requested remote work',\n  stepNote: 'Without your approval, a remote check-in on these dates counts as absent.',\n  approveLabel: 'Approve',\n  tag: 'Remote Work',\n};\n\npayload.to = body.to ?? src.managerEmail ?? '';\npayload.subject = body.subject\n  ?? ('Remote work request from ' + (src.employeeName || 'an employee') + ' (' + (src.fromDate || '') + ')');\n\nif (!payload.to) {\n  throw new Error('remote_work.approval_request ' + src.requestId + ': missing recipient');\n}\nif (!payload.approveUrl || !payload.rejectUrl) {\n  throw new Error('remote_work.approval_request ' + src.requestId + ': approve/reject URL missing');\n}\n\nreturn { json: payload };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        680
+      ],
+      "id": "1ee14a1c-7c68-426b-a04e-383f17731bf1",
+      "name": "Build Remote Work Approval"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "=<!DOCTYPE html>\n<html lang=\"en\" xmlns=\"http://www.w3.org/1999/xhtml\">\n<head>\n  <meta charset=\"utf-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <meta name=\"x-apple-disable-message-reformatting\" />\n  <title>Remote Work Request</title>\n  <!--[if mso]>\n  <style>table,td,div,p,a{font-family:Arial,Helvetica,sans-serif !important;}</style>\n  <![endif]-->\n</head>\n<body style=\"margin:0;padding:0;background-color:#e2e1e1;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;\">\n\n  <div style=\"display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#e2e1e1;\">\n    {{ $json.headline }}. Approve or reject it from this email.\n  </div>\n\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#e2e1e1;\">\n    <tr>\n      <td align=\"center\" style=\"padding:32px 16px;\">\n\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(46,31,31,0.08);\">\n\n          <tr>\n            <td style=\"background-color:#ffffff;padding:24px 32px;border-bottom:3px solid #11A8A0;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td style=\"vertical-align:middle;\">\n                    <img src=\"https://res.cloudinary.com/oyahmod8/image/upload/v1784128036/Primary_Logo_3_k9wtyj.png\"\n                         alt=\"Aidapt\" width=\"120\" height=\"auto\"\n                         style=\"display:block;border:0;outline:none;text-decoration:none;max-width:120px;height:auto;\" />\n                  </td>\n                  <td align=\"right\" style=\"vertical-align:middle;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:#11A8A0;\">\n                    {{ $json.tag }}\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:32px 32px 8px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0 0 6px 0;font-size:13px;color:#785d5c;\">{{ $json.eyebrow }}</p>\n              <h1 style=\"margin:0;font-size:22px;line-height:1.3;font-weight:700;color:#2e1f1f;\">\n                {{ $json.headline }}\n              </h1>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:20px 32px 8px 32px;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border:1px solid #e2e1e1;border-radius:10px;\">\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">From</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.fromDate }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">To</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.toDate }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">Working days</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.daysLabel }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;vertical-align:top;\">Reason</td>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.reason }}</td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:16px 32px 0 32px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#2e1f1f;\">\n              {{ $json.stepNote }}\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:20px 32px 8px 32px;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td width=\"50%\" style=\"padding-right:6px;\">\n                    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                      <tr>\n                        <td align=\"center\" bgcolor=\"#11A8A0\" style=\"border-radius:8px;background-color:#11A8A0;\">\n                          <a href=\"{{ $json.approveUrl }}\" target=\"_blank\"\n                             style=\"display:block;padding:14px 12px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#2e1f1f;text-decoration:none;border-radius:8px;\">\n                            {{ $json.approveLabel }}\n                          </a>\n                        </td>\n                      </tr>\n                    </table>\n                  </td>\n                  <td width=\"50%\" style=\"padding-left:6px;\">\n                    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                      <tr>\n                        <td align=\"center\" bgcolor=\"#ffffff\" style=\"border-radius:8px;background-color:#ffffff;border:2px solid #2e1f1f;\">\n                          <a href=\"{{ $json.rejectUrl }}\" target=\"_blank\"\n                             style=\"display:block;padding:12px 12px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#2e1f1f;text-decoration:none;border-radius:8px;\">\n                            Reject\n                          </a>\n                        </td>\n                      </tr>\n                    </table>\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:12px 32px 28px 32px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#785d5c;text-align:center;\">\n              Use Approve or Reject in this email. Each link works once.<br />\n              Prefer the portal? <a href=\"https://alms.aidaptnow.com/approvals\" target=\"_blank\" style=\"color:#2e1f1f;font-weight:700;text-decoration:underline;\">Review it in Approvals</a>.\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"background-color:#11A8A0;padding:20px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0;font-size:12px;color:#ffffff;\">Aidapt | Your AI Transformation Partner</p>\n              <p style=\"margin:4px 0 0 0;font-size:11px;color:#ffffff;\">This notification was sent automatically. Request ID: {{ $json.requestId }}</p>\n            </td>\n          </tr>\n\n        </table>\n\n      </td>\n    </tr>\n  </table>\n\n</body>\n</html>\n",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        900,
+        680
+      ],
+      "id": "9361ec7f-526e-4efa-a5e1-8ec8318230b9",
+      "name": "Send remote work to manager",
+      "webhookId": "08e35a91-b36b-4c84-b95d-b9f095f3ae8d",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "m9WTLZOWpRKaVwEa",
+          "name": "Sofi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Aidapt ALMS · Build Remote Work Decision Email\n// Event: remote_work.decision. Sent to the employee who applied.\n\nconst body = $json.body ?? $json;\nconst src = body.data ?? $json.data ?? $json;\n\nconst esc = (v) => String(v ?? '')\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;').replace(/'/g, '&#39;');\n\nconst decision = src.decision ?? 'Updated';\nconst isApproved = String(decision).toLowerCase() === 'approved';\nconst fromDate = esc(src.fromDate);\nconst toDate = esc(src.toDate);\nconst dateRange = fromDate === toDate ? fromDate : fromDate + ' to ' + toDate;\nconst days = Number(src.days) || 0;\nconst daysLabel = days + ' ' + (days === 1 ? 'day' : 'days');\n\nconst payload = {\n  requestId: esc(src.requestId),\n  employeeName: esc(src.employeeName ?? 'there'),\n  employeeEmail: src.employeeEmail ?? '',\n  fromDate,\n  toDate,\n  dateRange,\n  days,\n  daysLabel,\n  decision: esc(decision),\n  statusColor: isApproved ? '#11A8A0' : '#d33c1f',\n  headline: 'Your remote work was ' + String(decision).toLowerCase(),\n};\n\npayload.subject = body.subject ?? ('Your remote work request was ' + String(decision).toLowerCase());\npayload.to = body.to ?? payload.employeeEmail;\n\nif (!payload.to) {\n  throw new Error('remote_work.decision ' + src.requestId + ': missing employee email');\n}\n\nreturn { json: payload };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        960
+      ],
+      "id": "1132ea9e-88d3-4394-8ccc-5bc279d64470",
+      "name": "Build Remote Work Decision"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "=<!DOCTYPE html>\n<html lang=\"en\" xmlns=\"http://www.w3.org/1999/xhtml\">\n<head>\n  <meta charset=\"utf-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <meta name=\"x-apple-disable-message-reformatting\" />\n  <title>Remote Work Decision</title>\n  <!--[if mso]>\n  <style>table,td,div,p,a{font-family:Arial,Helvetica,sans-serif !important;}</style>\n  <![endif]-->\n</head>\n<body style=\"margin:0;padding:0;background-color:#e2e1e1;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;\">\n\n  <div style=\"display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#e2e1e1;\">\n    Your remote work ({{ $json.dateRange }}, {{ $json.daysLabel }}) was {{ $json.decision }}.\n  </div>\n\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background-color:#e2e1e1;\">\n    <tr>\n      <td align=\"center\" style=\"padding:32px 16px;\">\n\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(46,31,31,0.08);\">\n\n          <tr>\n            <td style=\"background-color:#ffffff;padding:24px 32px;border-bottom:3px solid {{ $json.statusColor }};\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n                <tr>\n                  <td style=\"vertical-align:middle;\">\n                    <img src=\"https://res.cloudinary.com/oyahmod8/image/upload/v1784128036/Primary_Logo_3_k9wtyj.png\"\n                         alt=\"Aidapt\" width=\"120\" height=\"auto\"\n                         style=\"display:block;border:0;outline:none;text-decoration:none;max-width:120px;height:auto;\" />\n                  </td>\n                  <td align=\"right\" style=\"vertical-align:middle;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:{{ $json.statusColor }};\">\n                    Remote Work\n                  </td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:32px 32px 8px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0 0 12px 0;font-size:14px;color:#2e1f1f;\">Hi {{ $json.employeeName }},</p>\n\n              <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 14px 0;\">\n                <tr>\n                  <td style=\"background-color:{{ $json.statusColor }};border-radius:999px;padding:6px 16px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#ffffff;\">\n                    {{ $json.decision }}\n                  </td>\n                </tr>\n              </table>\n\n              <h1 style=\"margin:0;font-size:22px;line-height:1.3;font-weight:700;color:#2e1f1f;\">\n                {{ $json.headline }}\n              </h1>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:20px 32px 8px 32px;\">\n              <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border:1px solid #e2e1e1;border-radius:10px;\">\n                <tr>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">Dates</td>\n                  <td style=\"padding:14px 18px;border-bottom:1px solid #e2e1e1;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.dateRange }}</td>\n                </tr>\n                <tr>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#785d5c;\">Duration</td>\n                  <td style=\"padding:14px 18px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#2e1f1f;\">{{ $json.daysLabel }}</td>\n                </tr>\n              </table>\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:20px 32px 28px 32px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#785d5c;\">\n              If anything looks off, reach out to your manager or reply to this email.\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"background-color:#11A8A0;padding:20px 32px;font-family:Arial,Helvetica,sans-serif;\">\n              <p style=\"margin:0;font-size:12px;color:#ffffff;\">Aidapt | Your AI Transformation Partner</p>\n              <p style=\"margin:4px 0 0 0;font-size:11px;color:#ffffff;\">This notification was sent automatically. Request ID: {{ $json.requestId }}</p>\n            </td>\n          </tr>\n\n        </table>\n\n      </td>\n    </tr>\n  </table>\n\n</body>\n</html>\n",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        900,
+        960
+      ],
+      "id": "fc506997-95da-4af0-94ed-deaea84fd192",
+      "name": "Send remote decision to employee",
+      "webhookId": "d28f25d3-975d-48f0-b97d-be7e7198b17b",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "m9WTLZOWpRKaVwEa",
+          "name": "Sofi"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "Build Leave Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Regularization",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Leave Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Remote Work Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Remote Work Decision",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ignore retired events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Leave Approval": {
+      "main": [
+        [
+          {
+            "node": "Send leave approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Regularization": {
+      "main": [
+        [
+          {
+            "node": "Send regularization to manager",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send regularization copy to Hitesh",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Leave Decision": {
+      "main": [
+        [
+          {
+            "node": "Send decision to employee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Remote Work Approval": {
+      "main": [
+        [
+          {
+            "node": "Send remote work to manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Remote Work Decision": {
+      "main": [
+        [
+          {
+            "node": "Send remote decision to employee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

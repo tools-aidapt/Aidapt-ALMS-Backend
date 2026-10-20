@@ -17,6 +17,20 @@ function modeForDistance(distanceMeters, radiusMeters) {
 }
 
 /**
+ * Day status written on check-in.
+ * Office attendance is Present. A remote check-in is Present only when remote
+ * work is already approved for that date; otherwise the punch is kept but the
+ * day counts as Absent.
+ * @param {'Office'|'Remote In'} mode
+ * @param {boolean} remoteApproved
+ * @returns {'Present'|'Absent'}
+ */
+function statusForCheckIn(mode, remoteApproved) {
+  if (mode === 'Remote In' && !remoteApproved) return 'Absent';
+  return 'Present';
+}
+
+/**
  * After this many minutes past shift StartTime (PKT), the day is an immediate
  * strike regardless of the monthly late accumulation.
  */
@@ -239,6 +253,7 @@ function computeWorked(checkInInstant, checkOutInstant, shiftLen) {
 
 module.exports = {
   modeForDistance,
+  statusForCheckIn,
   computeLateness,
   resolveGraceMinutes,
   shiftWithResolvedGrace,

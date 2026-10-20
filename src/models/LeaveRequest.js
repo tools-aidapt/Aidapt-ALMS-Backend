@@ -20,6 +20,7 @@ const LeaveRequest = makeModel({
     DecidedAt: { col: 'decided_at' },
     DecidedBy: { col: 'decided_by', link: true },
     DecisionToken: { col: 'decision_token' },
+    EvidenceUrl: { col: 'evidence_url' },
   },
 });
 

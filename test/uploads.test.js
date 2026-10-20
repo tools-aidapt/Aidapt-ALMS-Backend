@@ -178,6 +178,48 @@ describe('POST /api/uploads controller validation', () => {
     );
   });
 
+  test('accepts a PDF prescription for sick leave evidence', async () => {
+    uploadService.create = async (row) => {
+      assert.equal(row.purpose, 'sick_leave_evidence');
+      assert.equal(row.contentType, 'application/pdf');
+      return {
+        id: UPLOAD_ID,
+        employee_id: EMP,
+        purpose: 'sick_leave_evidence',
+        content_type: 'application/pdf',
+        byte_size: row.data.length,
+      };
+    };
+    const res = await invoke(uploadCtrl.create, {
+      user: { id: EMP, role: ROLES.EMPLOYEE },
+      body: { purpose: 'sick_leave_evidence' },
+      file: {
+        mimetype: 'application/pdf',
+        size: 16,
+        buffer: Buffer.from('%PDF-1.4\n'),
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.data.url.includes(`/api/uploads/${UPLOAD_ID}`));
+  });
+
+  test('rejects a prescription whose bytes are not an image or PDF', async () => {
+    await expectStatus(
+      () =>
+        invoke(uploadCtrl.create, {
+          user: { id: EMP, role: ROLES.EMPLOYEE },
+          body: { purpose: 'sick_leave_evidence' },
+          file: {
+            mimetype: 'application/pdf',
+            size: 12,
+            buffer: Buffer.from('not-a-real-file'),
+          },
+        }),
+      400,
+      'INVALID_FILE_TYPE'
+    );
+  });
+
   test('returns data.url envelope on success', async () => {
     const res = await invoke(uploadCtrl.create, {
       user: { id: EMP, role: ROLES.EMPLOYEE },
@@ -246,6 +288,81 @@ describe('GET /api/uploads/:id CNIC gating', () => {
       user: { id: HR, role: ROLES.HR_ADMIN },
     });
     assert.equal(res.statusCode, 200);
+  });
+});
+
+describe('GET sick-leave prescription', () => {
+  let origGet;
+  let origToken;
+  let origReviewer;
+
+  beforeEach(() => {
+    origGet = uploadService.getById;
+    origToken = uploadService.evidenceTokenGrantsAccess;
+    origReviewer = uploadService.isEvidenceReviewer;
+    uploadService.getById = async () => ({
+      id: UPLOAD_ID,
+      employee_id: EMP,
+      purpose: 'sick_leave_evidence',
+      content_type: 'application/pdf',
+      byte_size: 8,
+      data: Buffer.from('%PDF-1.4'),
+    });
+    uploadService.evidenceTokenGrantsAccess = async () => false;
+    uploadService.isEvidenceReviewer = async () => false;
+  });
+
+  afterEach(() => {
+    uploadService.getById = origGet;
+    uploadService.evidenceTokenGrantsAccess = origToken;
+    uploadService.isEvidenceReviewer = origReviewer;
+  });
+
+  test('email token opens the prescription while the approval link is live', async () => {
+    uploadService.evidenceTokenGrantsAccess = async (id, token) =>
+      id === UPLOAD_ID && token === 'live-token';
+    const res = await invoke(uploadCtrl.serve, {
+      params: { id: UPLOAD_ID },
+      query: { token: 'live-token' },
+      user: undefined,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.headers['Content-Type'], 'application/pdf');
+  });
+
+  test('a dead email token does not open the prescription', async () => {
+    await expectStatus(
+      () =>
+        invoke(uploadCtrl.serve, {
+          params: { id: UPLOAD_ID },
+          query: { token: 'used-token' },
+          user: undefined,
+        }),
+      403,
+      'TOKEN_INVALID'
+    );
+  });
+
+  test('the employee manager can view the prescription while signed in', async () => {
+    uploadService.isEvidenceReviewer = async () => true;
+    const res = await invoke(uploadCtrl.serve, {
+      params: { id: UPLOAD_ID },
+      query: {},
+      user: { id: OTHER, role: ROLES.MANAGER },
+    });
+    assert.equal(res.statusCode, 200);
+  });
+
+  test('an unrelated employee cannot view the prescription', async () => {
+    await expectStatus(
+      () =>
+        invoke(uploadCtrl.serve, {
+          params: { id: UPLOAD_ID },
+          query: {},
+          user: { id: OTHER, role: ROLES.EMPLOYEE },
+        }),
+      403
+    );
   });
 });
 

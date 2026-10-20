@@ -33,6 +33,8 @@ function mapTodayPunch(punch) {
         : formatHoursMinutes(Math.round(Number(f.OvertimeHours) * 60)),
     distanceMeters: f.DistanceMeters ?? null,
     checkInAccuracy: f.CheckInAccuracy ?? null,
+    status: f.Status || null,
+    remoteApproved: f.Mode === 'Remote In' ? f.Status !== 'Absent' : null,
   };
 }
 

@@ -44,7 +44,10 @@ async function recomputeForEmployeeMonth(employeeId, yearMonthOrDate) {
   const shiftId = employee && (employee.fields.AssignedShift || [])[0];
   const shift = shiftId ? await Shift.get(shiftId) : null;
 
-  const dayInfos = punches.map((r) => {
+  // Absent punches (including unapproved remote check-ins) are not worked days,
+  // so they do not add late strikes. Approval flips those punches to Present
+  // and this recompute then counts them.
+  const dayInfos = punches.filter((r) => r.fields.Status !== 'Absent').map((r) => {
     const date = String(r.fields.Date).slice(0, 10);
     const checkIn = r.fields.CheckInTime || null;
     const checkInMeta = {

@@ -26,8 +26,10 @@ const {
   computeWorked,
   lateStrikeHalfDayDates,
   halfDayDatesFromStrikeItems,
+  statusForCheckIn,
 } = require('../utils/attendanceCalc');
 const strikeService = require('./strikeService');
+const remoteWorkService = require('./remoteWorkService');
 const { conflict, notFound } = require('../middleware/errorHandler');
 
 /** Shape a punch record for API responses. */
@@ -64,6 +66,8 @@ function serialize(rec) {
         ? null
         : formatHoursMinutes(Math.round(Number(f.OvertimeHours) * 60)),
     status: f.Status || null,
+    // null for office punches. false when a remote check-in is counted Absent.
+    remoteApproved: f.Mode === 'Remote In' ? f.Status !== 'Absent' : null,
   };
 }
 
@@ -108,6 +112,10 @@ async function checkIn(employeeId, { lat, lng, accuracy }) {
   const now = nowUtcIso();
   const geo = await evaluateGeofence(lat, lng);
   const lateness = computeLateness(shiftWithResolvedGrace(shift, employee), now);
+  const remoteApproved =
+    geo.mode === 'Remote In'
+      ? await remoteWorkService.isApprovedForDate(employeeId, dateStr)
+      : true;
 
   const fields = {
     Employee: [employeeId],
@@ -120,7 +128,8 @@ async function checkIn(employeeId, { lat, lng, accuracy }) {
     Mode: geo.mode,
     IsLate: lateness.isLate,
     LateByMinutes: lateness.lateByMinutes,
-    Status: 'Present',
+    // Remote without an approved request is recorded, but the day is Absent.
+    Status: statusForCheckIn(geo.mode, remoteApproved),
   };
 
   const rec = existing
@@ -277,6 +286,8 @@ function dayEntry(dateStr, punch, ctx) {
     lateByMinutes: f ? f.LateByMinutes ?? 0 : 0,
     label: cellLabel(status, location, isLate), // e.g. "In Office (Late)"
     mode: f ? f.Mode || null : null,
+    // null unless the geofence was remote. false means the day counts as Absent.
+    remoteApproved: location === 'Remote' ? Boolean(f && f.Status !== 'Absent') : null,
     checkInTime: f ? pktHm(f.CheckInTime) : null,
     checkOutTime: f ? pktHm(f.CheckOutTime) : null,
     workedHours: f ? f.WorkedHours ?? null : null,
@@ -338,7 +349,7 @@ async function overview({ employeeId, from, to } = {}) {
     ? storedStrike.fields.StrikeItems
     : [];
   const strikeHalfDaySet = halfDayDatesFromStrikeItems(storedStrikeItems);
-  const dayInfos = rows.map((r) => {
+  const dayInfos = rows.filter((r) => r.fields.Status !== 'Absent').map((r) => {
     const date = String(r.fields.Date).slice(0, 10);
     if (r.fields.CheckInTime && shift) {
       const lateness = computeLateness(shiftWithResolvedGrace(shift, employee), r.fields.CheckInTime);
@@ -384,15 +395,19 @@ async function overview({ employeeId, from, to } = {}) {
 
   for (const r of rows) {
     const f = r.fields;
+    const absent = f.Status === 'Absent';
     if (f.Status === 'Present') counts.present += 1;
-    else if (f.Status === 'Absent') counts.absent += 1;
+    else if (absent) counts.absent += 1;
     else if (f.Status === 'On Leave') counts.onLeave += 1;
     else if (f.Status === 'Holiday') counts.holiday += 1;
-    if (f.IsLate) { counts.late += 1; totalLateMinutes += Number(f.LateByMinutes || 0); }
-    if (f.Mode === 'Office') counts.office += 1;
-    else if (f.Mode === 'Remote In') counts.remoteIn += 1;
-    totalWorkedMinutes += Number(f.WorkedMinutes || 0);
-    totalOvertimeHours += Number(f.OvertimeHours || 0);
+    // Unapproved remote check-ins stay on the punch but do not count as work.
+    if (!absent && f.IsLate) { counts.late += 1; totalLateMinutes += Number(f.LateByMinutes || 0); }
+    if (!absent && f.Mode === 'Office') counts.office += 1;
+    else if (!absent && f.Mode === 'Remote In') counts.remoteIn += 1;
+    if (!absent) {
+      totalWorkedMinutes += Number(f.WorkedMinutes || 0);
+      totalOvertimeHours += Number(f.OvertimeHours || 0);
+    }
   }
 
   // One entry per calendar day in the range, each with a derived cell status.

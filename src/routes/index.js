@@ -10,11 +10,13 @@ const attendanceRoutes = require('./attendanceRoutes');
 const leaveRoutes = require('./leaveRoutes');
 const holidayRoutes = require('./holidayRoutes');
 const regularizationRoutes = require('./regularizationRoutes');
+const remoteWorkRoutes = require('./remoteWorkRoutes');
 const adminRoutes = require('./adminRoutes');
 const dashboardRoutes = require('./dashboardRoutes');
 const jobsRoutes = require('./jobsRoutes');
 const teamRoutes = require('./teamRoutes');
 const uploadRoutes = require('./uploadRoutes');
+const financeRoutes = require('./financeRoutes');
 
 const router = express.Router();
 
@@ -30,8 +32,10 @@ router.use('/attendance', attendanceRoutes);
 router.use('/leave', leaveRoutes);
 router.use('/holidays', holidayRoutes);
 router.use('/regularizations', regularizationRoutes);
+router.use('/remote-work', remoteWorkRoutes);
 router.use('/admin', adminRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/jobs', jobsRoutes);
+router.use('/finance', financeRoutes);
 
 module.exports = router;
