@@ -146,12 +146,11 @@ authService / auth middleware → config/supabase        [identity]
 - **Leave balance:** deducted only when the final approver accepts the request.
   The manager's approval does not change the balance. Approval fails with 409
   if the balance is insufficient.
-- **Two-step leave approval:** submitting emails the employee's manager with a
-  single-use approve/reject link, and emails the final approver
-  (`LEAVE_FINAL_APPROVER_EMAIL`, Hitesh) that the request was filed. If the
-  manager approves, status becomes `Manager Approved` and a new link is emailed
-  to Hitesh for the final decision. His approval sets `Approved` and deducts
-  the balance. Either person can reject. The link is
+- **Two-step leave approval:** submitting emails only the employee's manager
+  with a single-use approve/reject link. If they approve, status becomes
+  `Manager Approved` and a new link is emailed to the final approver
+  (`LEAVE_FINAL_APPROVER_EMAIL`, Hitesh). His approval sets `Approved` and
+  deducts the balance. Either person can reject. The link is
   `GET /api/leave/requests/:id/decide?token=...&action=...`.
 - **Email delivery:** the backend never sends mail directly. `emailService`
   POSTs a JSON payload (`event`, rendered `to`/`subject`/`html`, plus structured

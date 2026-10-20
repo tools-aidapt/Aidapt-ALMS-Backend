@@ -200,37 +200,9 @@ async function emailStageApproverSafe(args) {
 }
 
 /**
- * On apply, tell Hitesh as well. His approve/reject links are sent later,
- * after the manager approves. Skipped when he is the manager or the applicant,
- * so he does not get two emails or an email about his own request.
- */
-async function emailFinalApproverFiled({ finalApprover, manager, employee, request }) {
-  if (!finalApprover || !finalApprover.fields.Email) return;
-  if (manager && finalApprover.id === manager.id) return;
-  if (employee && finalApprover.id === employee.id) return;
-  try {
-    // eslint-disable-next-line no-console
-    console.log(
-      `[leave] filed notice for request ${request.id} to final approver ${finalApprover.id} <${finalApprover.fields.Email}>`
-    );
-    await emailService.sendLeaveFiledNotice({
-      approverEmail: finalApprover.fields.Email,
-      approverName: finalApprover.fields.Name,
-      managerName: manager ? manager.fields.Name : null,
-      employeeName: employee ? employee.fields.Name : 'Employee',
-      employeeEmail: employee ? employee.fields.Email : null,
-      request,
-    });
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[leave] filed notice failed:', err.message);
-  }
-}
-
-/**
  * Submit a leave request. Computes Days, stores a single-use decision token,
- * and emails the employee's manager (approve/reject) and Hitesh (notice).
- * Hitesh's approve/reject links go out only after the manager approves.
+ * and emails only the employee's manager. Hitesh is emailed after that
+ * manager approves.
  */
 async function submit(employeeId, { leaveType, fromDate, toDate, reason }) {
   if (!LEAVE_TYPES.includes(leaveType)) {
@@ -278,7 +250,6 @@ async function submit(employeeId, { leaveType, fromDate, toDate, reason }) {
     finalApprover,
     manager,
   });
-  await emailFinalApproverFiled({ finalApprover, manager, employee, request: rec });
 
   return withPeople(serialize(rec));
 }
@@ -593,7 +564,6 @@ async function updateRequest(requestId, employeeId, patch) {
     finalApprover,
     manager,
   });
-  await emailFinalApproverFiled({ finalApprover, manager, employee, request: updated });
 
   return withPeople(serialize(updated));
 }

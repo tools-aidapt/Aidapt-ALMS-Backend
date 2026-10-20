@@ -149,58 +149,6 @@ function sendLeaveApprovalRequest({
 }
 
 /**
- * Tell the final approver, at submit time, that a leave was filed.
- * No approve/reject links: those go out only after the manager approves.
- */
-function sendLeaveFiledNotice({
-  approverEmail,
-  approverName,
-  managerName,
-  employeeName,
-  employeeEmail,
-  request,
-}) {
-  const leaveType = request.fields.LeaveType;
-  const subject = `Leave request from ${employeeName} (${leaveType}) — with their manager`;
-  const managerLabel = managerName ? escapeHtml(managerName) : 'their manager';
-  const html = `
-    <p>Hi ${escapeHtml(approverName || 'there')},</p>
-    <p>${escapeHtml(employeeName)} has applied for <strong>${leaveType}</strong> leave.
-       The request was emailed to ${managerLabel} first. You will receive a separate email to give final approval after they approve.</p>
-    <ul>
-      <li>From: ${request.fields.FromDate}</li>
-      <li>To: ${request.fields.ToDate}</li>
-      <li>Days: ${request.fields.Days}</li>
-      <li>Reason: ${escapeHtml(request.fields.Reason || '—')}</li>
-    </ul>
-  `;
-
-  return dispatch('leave.filed', {
-    emailReason: 'leave',
-    to: approverEmail,
-    employeeName,
-    employeeEmail: employeeEmail || null,
-    subject,
-    html,
-    text: stripHtml(html),
-    data: {
-      requestId: request.id,
-      stage: 'filed',
-      employeeName,
-      employeeEmail: employeeEmail || null,
-      approverName: approverName || null,
-      approverEmail,
-      managerName: managerName || null,
-      leaveType,
-      fromDate: request.fields.FromDate,
-      toDate: request.fields.ToDate,
-      days: request.fields.Days,
-      reason: request.fields.Reason || '',
-    },
-  });
-}
-
-/**
  * Notify the manager that an employee submitted a regularization request.
  * Regularization is approved in-app (no token link), so this points the manager
  * to the app to review their approval queue.
@@ -776,7 +724,6 @@ function escapeHtml(str = '') {
 module.exports = {
   sendMail,
   sendLeaveApprovalRequest,
-  sendLeaveFiledNotice,
   sendLeaveDecisionNotice,
   sendRemoteWorkApprovalRequest,
   sendRemoteWorkDecisionNotice,
