@@ -69,18 +69,42 @@ function sendMail({ to, subject, html, text }) {
 }
 
 /**
- * Manager approval request with single-use approve/reject links.
+ * Approval request with single-use approve/reject links.
+ * stage 'manager' goes to the employee's manager; stage 'final' goes to Hitesh
+ * after the manager has approved.
  */
-function sendLeaveApprovalRequest({ managerEmail, employeeName, employeeEmail, request, token }) {
+function sendLeaveApprovalRequest({
+  managerEmail,
+  approverEmail,
+  approverName,
+  stage = 'manager',
+  finalApproverName,
+  managerName,
+  employeeName,
+  employeeEmail,
+  request,
+  token,
+}) {
+  const to = approverEmail || managerEmail;
+  const isFinal = stage === 'final';
   const base = env.appBaseUrl.replace(/\/$/, '');
   const link = (action) =>
     `${base}/api/leave/requests/${request.id}/decide?token=${token}&action=${action}`;
 
   const approveUrl = link('approve');
   const rejectUrl = link('reject');
-  const subject = `Leave request from ${employeeName} (${request.fields.LeaveType})`;
+  const leaveType = request.fields.LeaveType;
+  const subject = isFinal
+    ? `Final approval needed: ${employeeName}'s ${leaveType} leave`
+    : `Leave request from ${employeeName} (${leaveType})`;
+  const nextApprover = finalApproverName || 'the final approver';
+  const intro = isFinal
+    ? `${escapeHtml(employeeName)}'s <strong>${leaveType}</strong> leave was approved${
+        managerName ? ` by ${escapeHtml(managerName)}` : ' by their manager'
+      } and now needs your final approval.`
+    : `${escapeHtml(employeeName)} has requested <strong>${leaveType}</strong> leave. If you approve, it goes to ${escapeHtml(nextApprover)} for final approval.`;
   const html = `
-    <p>${escapeHtml(employeeName)} has requested <strong>${request.fields.LeaveType}</strong> leave.</p>
+    <p>${intro}</p>
     <ul>
       <li>From: ${request.fields.FromDate}</li>
       <li>To: ${request.fields.ToDate}</li>
@@ -96,7 +120,7 @@ function sendLeaveApprovalRequest({ managerEmail, employeeName, employeeEmail, r
 
   return dispatch('leave.approval_request', {
     emailReason: 'leave',
-    to: managerEmail,
+    to,
     employeeName,
     employeeEmail: employeeEmail || null,
     subject,
@@ -105,16 +129,73 @@ function sendLeaveApprovalRequest({ managerEmail, employeeName, employeeEmail, r
     // Structured data so the n8n workflow can build its own template if preferred.
     data: {
       requestId: request.id,
+      stage,
       employeeName,
       employeeEmail: employeeEmail || null,
-      managerEmail,
-      leaveType: request.fields.LeaveType,
+      approverName: approverName || null,
+      approverEmail: to,
+      managerEmail: to,
+      managerName: managerName || null,
+      finalApproverName: nextApprover,
+      leaveType,
       fromDate: request.fields.FromDate,
       toDate: request.fields.ToDate,
       days: request.fields.Days,
       reason: request.fields.Reason || '',
       approveUrl,
       rejectUrl,
+    },
+  });
+}
+
+/**
+ * Tell the final approver, at submit time, that a leave was filed.
+ * No approve/reject links: those go out only after the manager approves.
+ */
+function sendLeaveFiledNotice({
+  approverEmail,
+  approverName,
+  managerName,
+  employeeName,
+  employeeEmail,
+  request,
+}) {
+  const leaveType = request.fields.LeaveType;
+  const subject = `Leave request from ${employeeName} (${leaveType}) — with their manager`;
+  const managerLabel = managerName ? escapeHtml(managerName) : 'their manager';
+  const html = `
+    <p>Hi ${escapeHtml(approverName || 'there')},</p>
+    <p>${escapeHtml(employeeName)} has applied for <strong>${leaveType}</strong> leave.
+       The request was emailed to ${managerLabel} first. You will receive a separate email to give final approval after they approve.</p>
+    <ul>
+      <li>From: ${request.fields.FromDate}</li>
+      <li>To: ${request.fields.ToDate}</li>
+      <li>Days: ${request.fields.Days}</li>
+      <li>Reason: ${escapeHtml(request.fields.Reason || '—')}</li>
+    </ul>
+  `;
+
+  return dispatch('leave.filed', {
+    emailReason: 'leave',
+    to: approverEmail,
+    employeeName,
+    employeeEmail: employeeEmail || null,
+    subject,
+    html,
+    text: stripHtml(html),
+    data: {
+      requestId: request.id,
+      stage: 'filed',
+      employeeName,
+      employeeEmail: employeeEmail || null,
+      approverName: approverName || null,
+      approverEmail,
+      managerName: managerName || null,
+      leaveType,
+      fromDate: request.fields.FromDate,
+      toDate: request.fields.ToDate,
+      days: request.fields.Days,
+      reason: request.fields.Reason || '',
     },
   });
 }
@@ -166,13 +247,117 @@ function sendRegularizationApprovalRequest({ managerEmail, employeeName, employe
   });
 }
 
-/** Notify the employee of the decision on their leave request. */
-function sendLeaveDecisionNotice({ employeeEmail, employeeName, request, decision }) {
+function mailDate(value) {
+  if (!value) return '—';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  return String(value).slice(0, 10);
+}
+
+/**
+ * Manager approval request for remote work, with single-use approve/reject links.
+ * Until this is approved, a remote check-in on those dates counts as Absent.
+ */
+function sendRemoteWorkApprovalRequest({ managerEmail, employeeName, employeeEmail, request, token }) {
+  const base = env.appBaseUrl.replace(/\/$/, '');
+  const link = (action) =>
+    `${base}/api/remote-work/requests/${request.id}/decide?token=${token}&action=${action}`;
+  const f = request.fields;
+  const fromDate = mailDate(f.FromDate);
+  const toDate = mailDate(f.ToDate);
+  const approveUrl = link('approve');
+  const rejectUrl = link('reject');
+  const subject = `Remote work request from ${employeeName} (${fromDate})`;
+  const html = `
+    <p>${escapeHtml(employeeName)} has requested to work remotely.</p>
+    <ul>
+      <li>From: ${fromDate}</li>
+      <li>To: ${toDate}</li>
+      <li>Working days: ${f.Days}</li>
+      <li>Reason: ${escapeHtml(f.Reason || '—')}</li>
+    </ul>
+    <p>Without your approval, a remote check-in on these dates is counted as <strong>Absent</strong>.</p>
+    <p>
+      <a href="${approveUrl}">Approve</a> &nbsp;|&nbsp;
+      <a href="${rejectUrl}">Reject</a>
+    </p>
+    <p style="color:#888;font-size:12px">These links are single-use.</p>
+  `;
+
+  return dispatch('remote_work.approval_request', {
+    emailReason: 'remote_work',
+    to: managerEmail,
+    employeeName,
+    employeeEmail: employeeEmail || null,
+    subject,
+    html,
+    text: stripHtml(html),
+    data: {
+      requestId: request.id,
+      employeeName,
+      employeeEmail: employeeEmail || null,
+      managerEmail,
+      fromDate,
+      toDate,
+      days: f.Days,
+      reason: f.Reason || '',
+      approveUrl,
+      rejectUrl,
+    },
+  });
+}
+
+/** Notify the employee of the decision on their remote work request. */
+function sendRemoteWorkDecisionNotice({ employeeEmail, employeeName, request, decision }) {
+  const f = request.fields;
+  const fromDate = mailDate(f.FromDate);
+  const toDate = mailDate(f.ToDate);
+  const subject = `Your remote work request was ${decision.toLowerCase()}`;
+  const html = `
+    <p>Hi ${escapeHtml(employeeName)},</p>
+    <p>Your remote work request (${fromDate} → ${toDate}, ${f.Days} working day(s))
+       has been <strong>${decision}</strong>.</p>
+    <p>${
+      decision === 'Approved'
+        ? 'Remote check-ins on these dates count as present.'
+        : 'Remote check-ins on these dates count as absent.'
+    }</p>
+  `;
+
+  return dispatch('remote_work.decision', {
+    emailReason: 'remote_work',
+    to: employeeEmail,
+    employeeName,
+    employeeEmail: employeeEmail || null,
+    subject,
+    html,
+    text: stripHtml(html),
+    data: {
+      requestId: request.id,
+      employeeName,
+      employeeEmail: employeeEmail || null,
+      fromDate,
+      toDate,
+      days: f.Days,
+      decision,
+    },
+  });
+}
+
+/** Notify the employee of the final decision, or a rejection at either step. */
+function sendLeaveDecisionNotice({ employeeEmail, employeeName, request, decision, stage }) {
   const subject = `Your leave request was ${decision.toLowerCase()}`;
+  const how =
+    decision === 'Rejected' && stage === 'manager'
+      ? 'Rejected by your manager'
+      : decision === 'Rejected' && stage === 'final'
+        ? 'Rejected at final approval'
+        : decision;
   const html = `
     <p>Hi ${escapeHtml(employeeName)},</p>
     <p>Your ${request.fields.LeaveType} leave (${request.fields.FromDate} → ${request.fields.ToDate},
-       ${request.fields.Days} day(s)) has been <strong>${decision}</strong>.</p>
+       ${request.fields.Days} day(s)) has been <strong>${escapeHtml(how)}</strong>.</p>
   `;
 
   return dispatch('leave.decision', {
@@ -192,6 +377,7 @@ function sendLeaveDecisionNotice({ employeeEmail, employeeName, request, decisio
       toDate: request.fields.ToDate,
       days: request.fields.Days,
       decision,
+      stage: stage || null,
     },
   });
 }
@@ -590,7 +776,10 @@ function escapeHtml(str = '') {
 module.exports = {
   sendMail,
   sendLeaveApprovalRequest,
+  sendLeaveFiledNotice,
   sendLeaveDecisionNotice,
+  sendRemoteWorkApprovalRequest,
+  sendRemoteWorkDecisionNotice,
   sendRegularizationApprovalRequest,
   sendPasswordResetOtp,
   sendAttendanceReminder,

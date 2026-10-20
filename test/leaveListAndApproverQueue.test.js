@@ -153,6 +153,15 @@ describe('GET /api/leave/pending-for-approver', () => {
           employeeId: OTHER,
           status: 'Pending',
           manager: [HR],
+          finalApprover: [HR],
+        },
+        {
+          id: 'l-final',
+          employee: [REP],
+          employeeId: REP,
+          status: 'Manager Approved',
+          manager: [MGR],
+          finalApprover: [HR],
         },
         {
           id: 'l-self',
@@ -163,8 +172,16 @@ describe('GET /api/leave/pending-for-approver', () => {
         },
       ];
       return rows.filter((r) => {
-        if (filters.status && r.status !== filters.status) return false;
         if (filters.excludeEmployeeId && r.employeeId === filters.excludeEmployeeId) return false;
+        if (filters.approverId) {
+          const managerStage =
+            r.status === 'Pending' && (r.manager || []).includes(filters.approverId);
+          const finalStage =
+            r.status === 'Manager Approved' &&
+            (r.finalApprover || []).includes(filters.approverId);
+          return managerStage || finalStage;
+        }
+        if (filters.status && r.status !== filters.status) return false;
         if (filters.managerId && !(r.manager || []).includes(filters.managerId)) return false;
         return true;
       });
@@ -190,21 +207,29 @@ describe('GET /api/leave/pending-for-approver', () => {
     const res = await invoke(leaveCtrl.listPendingForApprover, {
       user: { id: MGR, role: ROLES.MANAGER },
     });
-    assert.equal(lastFilters.status, 'Pending');
-    assert.equal(lastFilters.managerId, MGR);
+    assert.equal(lastFilters.approverId, MGR);
     assert.equal(lastFilters.excludeEmployeeId, MGR);
+    assert.deepEqual(
+      res.body.data.map((r) => r.id),
+      ['l-rep']
+    );
     for (const row of res.body.data) {
       assert.notEqual(row.employeeId, MGR);
+      assert.equal(row.status, 'Pending');
       assert.ok((row.manager || []).includes(MGR));
     }
   });
 
-  test('HR Admin sees all pending except their own', async () => {
+  test('HR Admin sees only requests waiting on them, not every pending request', async () => {
     const res = await invoke(leaveCtrl.listPendingForApprover, {
       user: { id: HR, role: ROLES.HR_ADMIN },
     });
-    assert.equal(lastFilters.managerId, undefined);
+    assert.equal(lastFilters.approverId, HR);
     assert.equal(lastFilters.excludeEmployeeId, HR);
+    assert.deepEqual(
+      res.body.data.map((r) => r.id).sort(),
+      ['l-final', 'l-other']
+    );
     for (const row of res.body.data) {
       assert.notEqual(row.employeeId, HR);
     }
@@ -251,6 +276,54 @@ describe('PATCH leave approve/reject authz', () => {
       403
     );
   });
+
+  test('HR Admin cannot skip the manager and approve a pending request', async () => {
+    LeaveRequest.get = async () => ({
+      id: 'x',
+      fields: {
+        Employee: [OTHER],
+        Manager: [MGR],
+        FinalApprover: [HR],
+        Status: 'Pending',
+      },
+    });
+    await expectStatus(
+      () => leaveService.decideInApp('x', 'approve', { id: HR, role: ROLES.HR_ADMIN }),
+      403
+    );
+  });
+
+  test('Manager cannot give the final approval', async () => {
+    LeaveRequest.get = async () => ({
+      id: 'x',
+      fields: {
+        Employee: [OTHER],
+        Manager: [MGR],
+        FinalApprover: [HR],
+        Status: 'Manager Approved',
+      },
+    });
+    await expectStatus(
+      () => leaveService.decideInApp('x', 'approve', { id: MGR, role: ROLES.MANAGER }),
+      403
+    );
+  });
+
+  test('Final approver cannot decide before the manager has approved', async () => {
+    LeaveRequest.get = async () => ({
+      id: 'x',
+      fields: {
+        Employee: [OTHER],
+        Manager: [MGR],
+        FinalApprover: [HR],
+        Status: 'Pending',
+      },
+    });
+    await expectStatus(
+      () => leaveService.decideInApp('x', 'reject', { id: HR, role: ROLES.HR_ADMIN }),
+      403
+    );
+  });
 });
 
 describe('leave serialize employeeId', () => {
@@ -265,5 +338,7 @@ describe('leave serialize employeeId', () => {
     });
     assert.equal(row.employeeId, EMP);
     assert.deepEqual(row.employee, [EMP]);
+    assert.equal(row.approvalStage, 'manager');
+    assert.deepEqual(row.finalApprover, []);
   });
 });

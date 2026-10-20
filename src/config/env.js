@@ -65,6 +65,12 @@ const env = {
 
   appBaseUrl: optional('APP_BASE_URL', 'http://localhost:4000'),
 
+  // Second step of leave approval. Every request is emailed to the employee's
+  // manager first; after they approve, this person gets the final decision.
+  leave: {
+    finalApproverEmail: optional('LEAVE_FINAL_APPROVER_EMAIL', 'hitesh@aidapt.co'),
+  },
+
   // Express "trust proxy" setting — needed for correct client IPs (rate limiting)
   // behind a proxy/load balancer. e.g. "1" (first hop) or "true". Empty = off.
   trustProxy: optional('TRUST_PROXY', ''),
@@ -73,6 +79,14 @@ const env = {
   // calling POST /api/jobs/mark-absent). Distinct from user auth. Empty = the
   // job endpoints are disabled (503) so they're never left open.
   jobsSecret: optional('JOBS_SECRET', ''),
+
+  // ClickUp finance mirror. The API key is optional so the rest of ALMS still
+  // boots when it is unset; finance sync returns 503 until it is set.
+  clickup: {
+    apiKey: optional('CLICKUP_API_KEY', ''),
+    financeListId: optional('CLICKUP_FINANCE_LIST_ID', '901217808335'),
+    workspaceId: optional('CLICKUP_WORKSPACE_ID', '9012897228'),
+  },
 };
 
 env.isProduction = env.nodeEnv === 'production';

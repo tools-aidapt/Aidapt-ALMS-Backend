@@ -41,6 +41,8 @@ and port (4000).
    Put `DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in **AWS Secrets Manager**
    and reference them; the rest can be plaintext. (`NODE_ENV`, `PORT`,
    `TRUST_PROXY` come from `apprunner.yaml`.)
+   Finance sync also needs `CLICKUP_API_KEY` (Secrets Manager).
+   `CLICKUP_FINANCE_LIST_ID` and `CLICKUP_WORKSPACE_ID` are optional overrides.
 3. **Health check:** HTTP, path `/health` (a dedicated top-level route, outside
    `/api` — unlogged and never rate-limited, so frequent probes stay cheap).
 4. After the first deploy, set `APP_BASE_URL` to the App Runner service URL and
@@ -130,14 +132,27 @@ authService / auth middleware → config/supabase        [identity]
   a fixed +5h offset (`src/utils/dateUtils.js`).
 - **Geofence:** Haversine distance from `OfficeConfig` centre. `Mode = Office` if
   `distance ≤ radius`, else `Remote In`.
+- **Remote work:** an employee applies for a date range (`POST /api/remote-work/requests`).
+  Their manager (or HR / leadership) approves it. A check-in outside the office
+  counts as **Present** only when an Approved request covers that date. Otherwise
+  the punch is stored (so the check-in is visible) but the day is **Absent** —
+  whether they checked in or not. Approving a request promotes any remote
+  punches already recorded in that range from Absent to Present. Office
+  check-ins do not need a remote request. Apply `db/remote_work_requests.sql`
+  on an existing database.
 - **Overtime:** `max(0, workedHours − shiftLength)`, computed at checkout.
 - **Leave days:** calendar days inclusive, minus non-working weekdays (per the
   employee's shift `WorkingDays`) and any date in Holidays.
-- **Leave balance:** deducted on approval; approval fails with 409 if the balance
-  is insufficient (deduction runs *before* the status flips to Approved).
-- **Email approval:** a single-use `DecisionToken` is generated at submit time;
-  the email link hits `GET /api/leave/requests/:id/decide?token=...&action=...`,
-  which validates the token (constant-time) and clears it after use.
+- **Leave balance:** deducted only when the final approver accepts the request.
+  The manager's approval does not change the balance. Approval fails with 409
+  if the balance is insufficient.
+- **Two-step leave approval:** submitting emails the employee's manager with a
+  single-use approve/reject link, and emails the final approver
+  (`LEAVE_FINAL_APPROVER_EMAIL`, Hitesh) that the request was filed. If the
+  manager approves, status becomes `Manager Approved` and a new link is emailed
+  to Hitesh for the final decision. His approval sets `Approved` and deducts
+  the balance. Either person can reject. The link is
+  `GET /api/leave/requests/:id/decide?token=...&action=...`.
 - **Email delivery:** the backend never sends mail directly. `emailService`
   POSTs a JSON payload (`event`, rendered `to`/`subject`/`html`, plus structured
   `data`) to `N8N_EMAIL_WEBHOOK_URL`; the n8n workflow sends the actual email. If
@@ -164,8 +179,17 @@ See the development brief (§7) for the full endpoint table. Highlights:
 | POST | `/leave/requests` | Employee+ |
 | PATCH | `/leave/requests/:id/approve` | Manager, HR Admin |
 | GET | `/leave/requests/:id/decide` | Public (token-gated) |
+| POST | `/remote-work/requests` | Any authenticated (self) |
+| GET | `/remote-work/pending-for-approver` | Manager, HR Admin, leadership |
+| PATCH | `/remote-work/requests/:id/approve` | Manager, HR Admin, leadership |
+| GET | `/remote-work/requests/:id/decide` | Public (token-gated) |
 | PATCH | `/admin/punches/:id` | HR Admin |
 | GET | `/admin/regularization-log` | HR Admin |
+| GET | `/finance` | HR Admin (optional `?month=YYYY-MM` or `?year=YYYY`) |
+| GET | `/finance/:id` | HR Admin |
+| GET | `/finance/:id/attachments/:attachmentId` | HR Admin |
+| POST | `/finance/sync` | HR Admin (pull ClickUp into the database) |
+| POST | `/jobs/sync-finance` | `X-Job-Secret` |
 
 ## Notable implementation decisions (deviations / clarifications)
 

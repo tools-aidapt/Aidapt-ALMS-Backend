@@ -29,7 +29,7 @@ const schemas = {
     }),
   listQuery: z.object({
     employeeId: z.string().optional(),
-    status: z.enum(['Pending', 'Approved', 'Rejected']).optional(),
+    status: z.enum(['Pending', 'Manager Approved', 'Approved', 'Rejected']).optional(),
   }),
   decideQuery: z.object({
     token: z.string().min(1),
@@ -62,8 +62,9 @@ const list = asyncHandler(async (req, res) => {
 });
 
 /**
- * Approver queue. Manager → Pending of direct reports; HR Admin → all Pending
- * company-wide. Never includes the caller's own requests. Employee → 403.
+ * Approver queue. Manager → reports still waiting on them. Final approver →
+ * requests the manager has already approved. Never includes the caller's own
+ * requests. Employee → 403.
  */
 const listPendingForApprover = asyncHandler(async (req, res) => {
   const rows = await leaveService.listPendingForApprover(req.user);
@@ -74,8 +75,9 @@ const getOne = asyncHandler(async (req, res) => {
   const request = await leaveService.getById(req.params.id);
   const isOwner = request.employee.includes(req.user.id);
   const isApprover = request.manager.includes(req.user.id);
+  const isFinalApprover = (request.finalApprover || []).includes(req.user.id);
   const isHrAdmin = req.user.role === ROLES.HR_ADMIN || req.user.isLeadership;
-  if (!isOwner && !isApprover && !isHrAdmin) throw forbidden();
+  if (!isOwner && !isApprover && !isFinalApprover && !isHrAdmin) throw forbidden();
   res.json({ data: request });
 });
 

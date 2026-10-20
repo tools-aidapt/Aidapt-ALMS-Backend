@@ -128,9 +128,12 @@ create table if not exists leave_requests (
   days           integer not null,
   reason         text,
   status         text not null default 'Pending'
-                   check (status in ('Pending','Approved','Rejected')),
+                   check (status in ('Pending','Manager Approved','Approved','Rejected')),
   manager_id     uuid references employees (id) on delete set null,
+  final_approver_id uuid references employees (id) on delete set null,
   applied_at     timestamptz not null default now(),
+  manager_approved_at timestamptz,
+  manager_approved_by uuid references employees (id) on delete set null,
   decided_at     timestamptz,
   decided_by     uuid references employees (id) on delete set null,
   decision_token text
@@ -138,6 +141,8 @@ create table if not exists leave_requests (
 create index if not exists leave_employee_idx on leave_requests (employee_id);
 create index if not exists leave_token_idx on leave_requests (decision_token);
 create index if not exists leave_decided_by_idx on leave_requests (decided_by);
+create index if not exists leave_final_approver_idx on leave_requests (final_approver_id);
+create index if not exists leave_status_idx on leave_requests (status);
 
 -- ---------------------------------------------------------------------------
 -- Leave balances  (one row per employee)
@@ -213,6 +218,33 @@ create table if not exists regularization_requests (
 create index if not exists regreq_employee_idx on regularization_requests (employee_id);
 create index if not exists regreq_manager_idx on regularization_requests (manager_id);
 create index if not exists regreq_status_idx on regularization_requests (status);
+
+-- ---------------------------------------------------------------------------
+-- Remote work requests (manager must approve before a remote day counts)
+-- A Remote In check-in on a date with no Approved request is stored, but the
+-- punch status is Absent until a covering request is approved.
+-- ---------------------------------------------------------------------------
+create table if not exists remote_work_requests (
+  id             uuid primary key default gen_random_uuid(),
+  employee_id    uuid not null references employees (id) on delete cascade,
+  from_date      date not null,
+  to_date        date not null,
+  days           integer not null,
+  reason         text,
+  status         text not null default 'Pending'
+                   check (status in ('Pending','Approved','Rejected')),
+  manager_id     uuid references employees (id) on delete set null,
+  applied_at     timestamptz not null default now(),
+  decided_at     timestamptz,
+  decided_by     uuid references employees (id) on delete set null,
+  decision_token text,
+  check (to_date >= from_date)
+);
+create index if not exists remotereq_employee_idx on remote_work_requests (employee_id);
+create index if not exists remotereq_manager_idx on remote_work_requests (manager_id);
+create index if not exists remotereq_status_idx on remote_work_requests (status);
+create index if not exists remotereq_dates_idx
+  on remote_work_requests (employee_id, from_date, to_date);
 
 -- ---------------------------------------------------------------------------
 -- Employee monthly late strikes
@@ -316,3 +348,25 @@ create table if not exists employee_teams (
 );
 create index if not exists employee_teams_team_idx on employee_teams (team_id);
 create index if not exists employee_teams_employee_idx on employee_teams (employee_id);
+
+-- ---------------------------------------------------------------------------
+-- Finance entries (mirror of the ClickUp list ORG - Finance)
+-- ---------------------------------------------------------------------------
+create table if not exists finance_entries (
+  id                   uuid primary key default gen_random_uuid(),
+  clickup_task_id      text not null unique,
+  name                 text not null,
+  status               text,
+  total_amount         numeric,
+  purchase_date        date,
+  purchase_month_key   text not null default '',
+  purchase_month_label text not null default '',
+  purchase_type        text,
+  comment              text,
+  attachments          jsonb not null default '[]'::jsonb,
+  clickup_url          text,
+  task_created_at      timestamptz,
+  synced_at            timestamptz not null default now(),
+  created_at           timestamptz not null default now()
+);
+create index if not exists finance_entries_month_idx on finance_entries (purchase_month_key);
