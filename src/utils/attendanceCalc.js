@@ -17,10 +17,10 @@ function modeForDistance(distanceMeters, radiusMeters) {
 }
 
 /**
- * Day status written on check-in.
+ * Day status written on a successful check-in.
  * Office attendance is Present. A remote check-in is Present only when remote
- * work is already approved for that date; otherwise the punch is kept but the
- * day counts as Absent.
+ * work is already approved for that date. Check-in rejects an unapproved
+ * remote attempt before a punch is stored; Absent is only a safeguard.
  * @param {'Office'|'Remote In'} mode
  * @param {boolean} remoteApproved
  * @returns {'Present'|'Absent'}

@@ -13,6 +13,11 @@ router.get(
   validate(ctrl.schemas.decideQuery, 'query'),
   ctrl.decide
 );
+router.get(
+  '/requests/:id/evidence/decide',
+  validate(ctrl.schemas.evidenceDecideQuery, 'query'),
+  ctrl.decideEvidence
+);
 
 router.use(authenticate);
 
@@ -32,6 +37,17 @@ router.patch(
   '/requests/:id/reject',
   requireRoleOrLeadership(ROLES.MANAGER, ROLES.HR_ADMIN),
   ctrl.reject
+);
+router.post('/requests/:id/evidence', validate(ctrl.schemas.evidence), ctrl.submitEvidence);
+router.patch(
+  '/requests/:id/evidence/accept',
+  requireRoleOrLeadership(ROLES.MANAGER, ROLES.HR_ADMIN),
+  ctrl.acceptEvidence
+);
+router.patch(
+  '/requests/:id/evidence/reject',
+  requireRoleOrLeadership(ROLES.MANAGER, ROLES.HR_ADMIN),
+  ctrl.rejectEvidence
 );
 router.get('/balances/:employeeId', ctrl.balances);
 router.patch(

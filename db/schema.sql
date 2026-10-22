@@ -128,7 +128,10 @@ create table if not exists leave_requests (
   days           integer not null,
   reason         text,
   status         text not null default 'Pending'
-                   check (status in ('Pending','Manager Approved','Approved','Rejected')),
+                   check (status in (
+                     'Pending','Manager Approved','Approved','Rejected',
+                     'Awaiting Prescription','Prescription Submitted','Prescription Missing'
+                   )),
   manager_id     uuid references employees (id) on delete set null,
   final_approver_id uuid references employees (id) on delete set null,
   applied_at     timestamptz not null default now(),
@@ -221,9 +224,8 @@ create index if not exists regreq_manager_idx on regularization_requests (manage
 create index if not exists regreq_status_idx on regularization_requests (status);
 
 -- ---------------------------------------------------------------------------
--- Remote work requests (manager must approve before a remote day counts)
--- A Remote In check-in on a date with no Approved request is stored, but the
--- punch status is Absent until a covering request is approved.
+-- Remote work requests (manager must approve before a remote check-in)
+-- A Remote In check-in is rejected unless an Approved request covers that date.
 -- ---------------------------------------------------------------------------
 create table if not exists remote_work_requests (
   id             uuid primary key default gen_random_uuid(),

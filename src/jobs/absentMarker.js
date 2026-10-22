@@ -5,6 +5,7 @@ const Employee = require('../models/Employee');
 const Shift = require('../models/Shift');
 const AttendancePunch = require('../models/AttendancePunch');
 const holidayService = require('../services/holidayService');
+const leaveService = require('../services/leaveService');
 const { todayPktDateStr, dowForDateStr, nowUtcIso } = require('../utils/dateUtils');
 const { shiftLengthHours, computeWorked } = require('../utils/attendanceCalc');
 
@@ -96,6 +97,9 @@ function schedule() {
         const result = await markAbsentees();
         // eslint-disable-next-line no-console
         console.log('[cron:absentMarker]', result);
+        const prescriptions = await leaveService.closeMissingPrescriptions();
+        // eslint-disable-next-line no-console
+        console.log('[cron:missingPrescription]', prescriptions);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[cron:absentMarker] failed:', err.message);

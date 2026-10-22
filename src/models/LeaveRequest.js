@@ -45,12 +45,14 @@ LeaveRequest.query = function query({
   if (managerId) where.push(`manager_id = $${params.push(managerId)}`);
   if (finalApproverId) where.push(`final_approver_id = $${params.push(finalApproverId)}`);
   if (status) where.push(`status = $${params.push(status)}`);
-  // Action queue: manager stage for the assigned manager, final stage for Hitesh.
+  // Action queue: manager stage, Hitesh's final stage, and a prescription
+  // waiting on the same manager. Hitesh does not review the file.
   if (approverId) {
     const i = params.push(approverId);
     where.push(`(
       (status = 'Pending' AND manager_id = $${i})
       OR (status = 'Manager Approved' AND final_approver_id = $${i})
+      OR (status = 'Prescription Submitted' AND manager_id = $${i})
     )`);
   }
   if (excludeEmployeeId) {

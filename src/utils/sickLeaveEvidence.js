@@ -1,10 +1,17 @@
 'use strict';
 
 const { badRequest, forbidden } = require('../middleware/errorHandler');
+const { dowForDateStr } = require('./dateUtils');
 
-/** Working days. One sick day does not need a file; two or more do. */
+/** Working days. One sick day never needs a file; two or more do, after the employee is back. */
 const SICK_EVIDENCE_MIN_DAYS = 2;
 const EVIDENCE_PURPOSE = 'sick_leave_evidence';
+
+/** Statuses that still count as leave on attendance and reports. */
+const COVERING_LEAVE_STATUSES = ['Approved', 'Awaiting Prescription', 'Prescription Submitted'];
+const COVERING_LEAVE_STATUS_SQL = `status IN ('Approved', 'Awaiting Prescription', 'Prescription Submitted')`;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function needsEvidence(leaveType, days) {
   return leaveType === 'Sick' && Number(days) >= SICK_EVIDENCE_MIN_DAYS;
@@ -20,31 +27,47 @@ function canonicalEvidenceUrl(appBaseUrl, uploadId) {
   return `${base}/api/uploads/${uploadId}`;
 }
 
+function addCalendarDays(dateStr, days) {
+  const start = Date.parse(`${String(dateStr).slice(0, 10)}T12:00:00Z`);
+  return new Date(start + days * MS_PER_DAY).toISOString().slice(0, 10);
+}
+
 /**
- * Sick leave of 2+ working days must cite an upload this employee made with
- * purpose sick_leave_evidence. Other leave may omit it. A URL that is present
- * is always checked, so a casual request cannot point at someone else's file.
- * Returns the canonical evidence URL, or null when none is required or given.
+ * First working day after toDate. Weekends follow the shift; public holidays are skipped.
+ * workingDays is a Set (or array) of 'Mon'..'Sun'. holidays is a Set (or array) of YYYY-MM-DD.
  */
-function resolveSickLeaveEvidence({
-  leaveType,
-  days,
-  evidenceUrl,
-  upload,
-  employeeId,
-  appBaseUrl,
-}) {
-  const required = needsEvidence(leaveType, days);
-  const raw = evidenceUrl == null ? '' : String(evidenceUrl).trim();
-  if (!raw) {
-    if (required) {
-      throw badRequest(
-        "Sick leave of 2 or more working days requires a doctor's prescription or other medical evidence. Upload the file, then include evidenceUrl.",
-        'EVIDENCE_REQUIRED'
-      );
-    }
-    return null;
+function returnDayAfter(toDate, workingDays, holidays) {
+  const working = workingDays instanceof Set ? workingDays : new Set(workingDays || []);
+  const holidaySet = holidays instanceof Set ? holidays : new Set(holidays || []);
+  let cursor = addCalendarDays(toDate, 1);
+  for (let i = 0; i < 21; i += 1) {
+    if (working.has(dowForDateStr(cursor)) && !holidaySet.has(cursor)) return cursor;
+    cursor = addCalendarDays(cursor, 1);
   }
+  return cursor;
+}
+
+/** Upload is allowed from the return day onward. */
+function returnWindowOpen(today, returnDay) {
+  return String(today) >= String(returnDay);
+}
+
+/** The return day is over once today's date is after it. The day itself is still open. */
+function returnWindowOver(today, returnDay) {
+  return String(today) > String(returnDay);
+}
+
+function shouldCloseForMissingPrescription({ status, today, returnDay }) {
+  return status === 'Awaiting Prescription' && String(returnDay) <= String(today);
+}
+
+/**
+ * Validate a prescription upload URL. An empty URL returns null — applying for
+ * leave does not require the file. The later evidence endpoint rejects null.
+ */
+function resolveSickLeaveEvidence({ evidenceUrl, upload, employeeId, appBaseUrl }) {
+  const raw = evidenceUrl == null ? '' : String(evidenceUrl).trim();
+  if (!raw) return null;
 
   const id = uploadIdFromUrl(raw);
   const uploadId = upload && upload.id ? String(upload.id).toLowerCase() : '';
@@ -69,8 +92,15 @@ function resolveSickLeaveEvidence({
 module.exports = {
   SICK_EVIDENCE_MIN_DAYS,
   EVIDENCE_PURPOSE,
+  COVERING_LEAVE_STATUSES,
+  COVERING_LEAVE_STATUS_SQL,
   needsEvidence,
   uploadIdFromUrl,
   canonicalEvidenceUrl,
+  addCalendarDays,
+  returnDayAfter,
+  returnWindowOpen,
+  returnWindowOver,
+  shouldCloseForMissingPrescription,
   resolveSickLeaveEvidence,
 };

@@ -111,11 +111,18 @@ async function checkIn(employeeId, { lat, lng, accuracy }) {
   const { employee, shift } = await loadEmployeeShift(employeeId);
   const now = nowUtcIso();
   const geo = await evaluateGeofence(lat, lng);
-  const lateness = computeLateness(shiftWithResolvedGrace(shift, employee), now);
   const remoteApproved =
     geo.mode === 'Remote In'
       ? await remoteWorkService.isApprovedForDate(employeeId, dateStr)
       : true;
+  if (geo.mode === 'Remote In' && !remoteApproved) {
+    throw conflict(
+      'You cannot check in remotely until your remote work request is approved.',
+      'REMOTE_NOT_APPROVED'
+    );
+  }
+
+  const lateness = computeLateness(shiftWithResolvedGrace(shift, employee), now);
 
   const fields = {
     Employee: [employeeId],
@@ -128,7 +135,6 @@ async function checkIn(employeeId, { lat, lng, accuracy }) {
     Mode: geo.mode,
     IsLate: lateness.isLate,
     LateByMinutes: lateness.lateByMinutes,
-    // Remote without an approved request is recorded, but the day is Absent.
     Status: statusForCheckIn(geo.mode, remoteApproved),
   };
 
@@ -316,7 +322,8 @@ async function overview({ employeeId, from, to } = {}) {
     Holiday.dateSet(fromDate, toDate),
     query(
       `SELECT from_date, to_date FROM leave_requests
-       WHERE employee_id = $1 AND status = 'Approved'
+       WHERE employee_id = $1
+         AND status IN ('Approved', 'Awaiting Prescription', 'Prescription Submitted')
          AND from_date <= $3 AND to_date >= $2`,
       [employeeId, fromDate, toDate]
     ),

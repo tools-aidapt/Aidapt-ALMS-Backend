@@ -118,7 +118,7 @@ async function enrichMembers(members, { includeLiveDetail = true } = {}) {
       `SELECT employee_id, leave_type
        FROM leave_requests
        WHERE employee_id = ANY($1::uuid[])
-         AND status = 'Approved'
+         AND status IN ('Approved', 'Awaiting Prescription', 'Prescription Submitted')
          AND from_date <= $2::date
          AND to_date >= $2::date`,
       [ids, today]

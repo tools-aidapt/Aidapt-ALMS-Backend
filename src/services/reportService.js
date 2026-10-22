@@ -114,7 +114,7 @@ async function loadApprovedLeaveByEmployee(employeeIds, from, to) {
   const { rows } = await query(
     `SELECT employee_id, leave_type, from_date, to_date, days, reason
        FROM leave_requests
-      WHERE status = 'Approved'
+      WHERE status IN ('Approved', 'Awaiting Prescription', 'Prescription Submitted')
         AND employee_id = ANY($1::uuid[])
         AND from_date <= $3::date
         AND to_date >= $2::date

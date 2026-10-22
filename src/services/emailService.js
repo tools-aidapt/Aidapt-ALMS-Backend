@@ -95,6 +95,7 @@ function sendLeaveApprovalRequest({
   employeeEmail,
   request,
   token,
+  prescriptionLater = false,
 }) {
   const to = approverEmail || managerEmail;
   const isFinal = stage === 'final';
@@ -106,14 +107,28 @@ function sendLeaveApprovalRequest({
   const rejectUrl = link('reject');
   const evidenceUrl = evidenceViewUrl(request.fields.EvidenceUrl, token);
   const leaveType = request.fields.LeaveType;
+  const prescriptionMissing = Boolean(prescriptionLater) && !evidenceUrl;
+  const prescriptionNote = prescriptionMissing
+    ? "No doctor's prescription was submitted. The employee uploads it when they are back. You can still approve or reject the leave now."
+    : evidenceUrl
+      ? "A doctor's prescription was attached with this request."
+      : '';
   const subject = isFinal
     ? `Final approval needed: ${employeeName}'s ${leaveType} leave`
     : `Leave request from ${employeeName} (${leaveType})`;
   const nextApprover = finalApproverName || 'the final approver';
   const intro = isFinal
-    ? `${escapeHtml(employeeName)}'s <strong>${leaveType}</strong> leave was approved${
-        managerName ? ` by ${escapeHtml(managerName)}` : ' by their manager'
-      } and now needs your final approval.`
+    ? prescriptionLater
+      ? evidenceUrl
+        ? `${escapeHtml(employeeName)}'s <strong>Sick</strong> leave was approved${
+            managerName ? ` by ${escapeHtml(managerName)}` : ' by their manager'
+          }. A doctor's prescription is already attached. Approving lets them be off. Their balance is not deducted until their manager accepts that file.`
+        : `${escapeHtml(employeeName)}'s <strong>Sick</strong> leave was approved${
+            managerName ? ` by ${escapeHtml(managerName)}` : ' by their manager'
+          }. Approving lets them be off. Their balance is not deducted until they return with a doctor's prescription and their manager accepts it.`
+      : `${escapeHtml(employeeName)}'s <strong>${leaveType}</strong> leave was approved${
+          managerName ? ` by ${escapeHtml(managerName)}` : ' by their manager'
+        } and now needs your final approval.`
     : `${escapeHtml(employeeName)} has requested <strong>${leaveType}</strong> leave. If you approve, it goes to ${escapeHtml(nextApprover)} for final approval.`;
   const html = `
     <p>${intro}</p>
@@ -125,7 +140,9 @@ function sendLeaveApprovalRequest({
       ${
         evidenceUrl
           ? `<li>Doctor's prescription: <a href="${escapeHtml(evidenceUrl)}">View evidence</a></li>`
-          : ''
+          : prescriptionMissing
+            ? `<li>Doctor's prescription: Not submitted yet</li>`
+            : ''
       }
     </ul>
     <p>
@@ -159,7 +176,10 @@ function sendLeaveApprovalRequest({
       toDate: request.fields.ToDate,
       days: request.fields.Days,
       reason: request.fields.Reason || '',
-      evidenceUrl,
+      evidenceUrl: evidenceUrl || null,
+      prescriptionLater: Boolean(prescriptionLater),
+      prescriptionStatus: prescriptionMissing ? 'not_submitted' : evidenceUrl ? 'submitted' : 'not_required',
+      prescriptionNote,
       approveUrl,
       rejectUrl,
     },
@@ -223,7 +243,7 @@ function mailDate(value) {
 
 /**
  * Manager approval request for remote work, with single-use approve/reject links.
- * Until this is approved, a remote check-in on those dates counts as Absent.
+ * Until this is approved, the employee cannot check in remotely on those dates.
  */
 function sendRemoteWorkApprovalRequest({ managerEmail, employeeName, employeeEmail, request, token }) {
   const base = env.appBaseUrl.replace(/\/$/, '');
@@ -243,7 +263,7 @@ function sendRemoteWorkApprovalRequest({ managerEmail, employeeName, employeeEma
       <li>Working days: ${f.Days}</li>
       <li>Reason: ${escapeHtml(f.Reason || '—')}</li>
     </ul>
-    <p>Without your approval, a remote check-in on these dates is counted as <strong>Absent</strong>.</p>
+    <p>They cannot check in remotely on these dates until you approve this request.</p>
     <p>
       <a href="${approveUrl}">Approve</a> &nbsp;|&nbsp;
       <a href="${rejectUrl}">Reject</a>
@@ -286,8 +306,8 @@ function sendRemoteWorkDecisionNotice({ employeeEmail, employeeName, request, de
        has been <strong>${decision}</strong>.</p>
     <p>${
       decision === 'Approved'
-        ? 'Remote check-ins on these dates count as present.'
-        : 'Remote check-ins on these dates count as absent.'
+        ? 'You can check in remotely on these dates.'
+        : 'You cannot check in remotely on these dates.'
     }</p>
   `;
 
@@ -311,9 +331,17 @@ function sendRemoteWorkDecisionNotice({ employeeEmail, employeeName, request, de
   });
 }
 
-/** Notify the employee of the final decision, or a rejection at either step. */
-function sendLeaveDecisionNotice({ employeeEmail, employeeName, request, decision, stage }) {
-  const subject = `Your leave request was ${decision.toLowerCase()}`;
+/** Notify the employee of a decision, a provisional approval, or a prescription outcome. */
+function sendLeaveDecisionNotice({
+  employeeEmail,
+  employeeName,
+  request,
+  decision,
+  stage,
+  note,
+  subject: subjectOverride,
+}) {
+  const subject = subjectOverride || `Your leave request was ${String(decision).toLowerCase()}`;
   const how =
     decision === 'Rejected' && stage === 'manager'
       ? 'Rejected by your manager'
@@ -324,6 +352,7 @@ function sendLeaveDecisionNotice({ employeeEmail, employeeName, request, decisio
     <p>Hi ${escapeHtml(employeeName)},</p>
     <p>Your ${request.fields.LeaveType} leave (${request.fields.FromDate} → ${request.fields.ToDate},
        ${request.fields.Days} day(s)) has been <strong>${escapeHtml(how)}</strong>.</p>
+    ${note ? `<p>${escapeHtml(note)}</p>` : ''}
   `;
 
   return dispatch('leave.decision', {
@@ -344,6 +373,68 @@ function sendLeaveDecisionNotice({ employeeEmail, employeeName, request, decisio
       days: request.fields.Days,
       decision,
       stage: stage || null,
+      note: note || '',
+    },
+  });
+}
+
+/**
+ * Ask the employee's manager to accept or reject a doctor's prescription.
+ * Accept and reject links are single-use, same pattern as leave approval.
+ */
+function sendLeaveEvidenceReview({
+  managerEmail,
+  managerName,
+  employeeName,
+  employeeEmail,
+  request,
+  token,
+  acceptUrl,
+  rejectUrl,
+}) {
+  const evidenceUrl = evidenceViewUrl(request.fields.EvidenceUrl, token);
+  const subject = `Prescription to review: ${employeeName}'s sick leave`;
+  const html = `
+    <p>${escapeHtml(employeeName)} is back and uploaded a doctor's prescription for sick leave
+       (${request.fields.FromDate} → ${request.fields.ToDate}, ${request.fields.Days} day(s)).</p>
+    <p>${
+      evidenceUrl
+        ? `<a href="${escapeHtml(evidenceUrl)}">View the prescription</a>`
+        : 'The prescription is attached to the request.'
+    }</p>
+    <p>Accepting deducts the sick days from their balance.</p>
+    <p>
+      <a href="${acceptUrl}">Accept prescription</a> &nbsp;|&nbsp;
+      <a href="${rejectUrl}">Reject</a>
+    </p>
+  `;
+
+  return dispatch('leave.evidence_review', {
+    emailReason: 'leave',
+    to: managerEmail,
+    employeeName,
+    employeeEmail: employeeEmail || null,
+    subject,
+    html,
+    text: stripHtml(html),
+    data: {
+      requestId: request.id,
+      stage: 'evidence',
+      employeeName,
+      employeeEmail: employeeEmail || null,
+      approverName: managerName || null,
+      approverEmail: managerEmail,
+      managerEmail,
+      managerName: managerName || null,
+      leaveType: request.fields.LeaveType,
+      fromDate: request.fields.FromDate,
+      toDate: request.fields.ToDate,
+      days: request.fields.Days,
+      reason: request.fields.Reason || '',
+      evidenceUrl,
+      approveUrl: acceptUrl,
+      rejectUrl,
+      prescriptionLater: false,
     },
   });
 }
@@ -743,6 +834,7 @@ module.exports = {
   sendMail,
   sendLeaveApprovalRequest,
   sendLeaveDecisionNotice,
+  sendLeaveEvidenceReview,
   sendRemoteWorkApprovalRequest,
   sendRemoteWorkDecisionNotice,
   sendRegularizationApprovalRequest,

@@ -93,7 +93,7 @@ async function evidenceTokenGrantsAccess(uploadId, token) {
     `SELECT 1
        FROM leave_requests
       WHERE decision_token = $1
-        AND status IN ('Pending', 'Manager Approved')
+        AND status IN ('Pending', 'Manager Approved', 'Prescription Submitted')
         AND evidence_url LIKE '%/api/uploads/' || $2::text
       LIMIT 1`,
     [String(token), String(uploadId)]

@@ -85,8 +85,9 @@ async function isApprovedForDate(employeeId, dateStr) {
 
 /**
  * After approval, remote check-ins in the range that were stored as Absent
- * become Present. Days with no check-in stay absent — approval authorizes
- * remote attendance, it does not invent a punch.
+ * (from before check-in required approval) become Present. Days with no
+ * check-in stay absent — approval authorizes remote attendance, it does not
+ * invent a punch.
  */
 async function promoteApprovedRemotePunches(employeeId, fromDate, toDate) {
   const { rows } = await query(

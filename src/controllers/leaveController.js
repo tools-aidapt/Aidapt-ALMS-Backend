@@ -16,7 +16,7 @@ const schemas = {
     fromDate: dateStr,
     toDate: dateStr,
     reason: z.string().optional(),
-    evidenceUrl: z.union([z.string().trim().max(2048), z.null()]).optional(),
+    evidenceUrl: z.string().trim().max(2048).nullable().optional(),
   }),
   update: z
     .object({
@@ -24,14 +24,31 @@ const schemas = {
       fromDate: dateStr.optional(),
       toDate: dateStr.optional(),
       reason: z.string().optional(),
-      evidenceUrl: z.union([z.string().trim().max(2048), z.null()]).optional(),
+      evidenceUrl: z.string().trim().max(2048).nullable().optional(),
     })
     .refine((obj) => Object.keys(obj).length > 0, {
       message: 'Provide at least one field to update',
     }),
   listQuery: z.object({
     employeeId: z.string().optional(),
-    status: z.enum(['Pending', 'Manager Approved', 'Approved', 'Rejected']).optional(),
+    status: z
+      .enum([
+        'Pending',
+        'Manager Approved',
+        'Approved',
+        'Rejected',
+        'Awaiting Prescription',
+        'Prescription Submitted',
+        'Prescription Missing',
+      ])
+      .optional(),
+  }),
+  evidence: z.object({
+    evidenceUrl: z.string().trim().min(1).max(2048),
+  }),
+  evidenceDecideQuery: z.object({
+    token: z.string().min(1),
+    action: z.enum(['accept', 'reject']),
   }),
   decideQuery: z.object({
     token: z.string().min(1),
@@ -110,6 +127,28 @@ const decide = asyncHandler(async (req, res) => {
   res.json({ data: request });
 });
 
+const submitEvidence = asyncHandler(async (req, res) => {
+  const request = await leaveService.submitEvidence(req.params.id, req.user.id, req.body);
+  res.json({ data: request });
+});
+
+const acceptEvidence = asyncHandler(async (req, res) => {
+  const request = await leaveService.acceptEvidence(req.params.id, req.user);
+  res.json({ data: request });
+});
+
+const rejectEvidence = asyncHandler(async (req, res) => {
+  const request = await leaveService.rejectEvidence(req.params.id, req.user);
+  res.json({ data: request });
+});
+
+// Public, token-gated endpoint hit from the prescription review email.
+const decideEvidence = asyncHandler(async (req, res) => {
+  const { token, action } = req.query;
+  const request = await leaveService.decideEvidenceByToken(req.params.id, token, action);
+  res.json({ data: request });
+});
+
 const balances = asyncHandler(async (req, res) => {
   const targetId = req.params.employeeId;
   const isSelf = req.user.id === targetId;
@@ -145,6 +184,10 @@ module.exports = {
   approve,
   reject,
   decide,
+  submitEvidence,
+  acceptEvidence,
+  rejectEvidence,
+  decideEvidence,
   balances,
   setBalance,
   schemas,
